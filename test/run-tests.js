@@ -1,4 +1,5 @@
 import assert from "assert";
+import { readFile } from "node:fs/promises";
 import {
   parseDeploymentUrl,
   parseDeploymentUrls,
@@ -304,6 +305,16 @@ test("integrates Chrome 122 messaging with incremental and race-safe refreshes",
   assert.equal(messageListener({ type: "unknown" }, {}, () => {}), false);
   delete globalThis.chrome;
   delete globalThis.fetch;
+});
+
+test("keeps the Chrome popup at a usable fixed width", async () => {
+  const css = await readFile(new URL("../popup.css", import.meta.url), "utf8");
+  assert.match(css, /body\s*\{[^}]*width:\s*780px/s);
+  assert.doesNotMatch(
+    css,
+    /@media[^\{]*\{[\s\S]*?body\s*\{[^}]*width:\s*100vw/s,
+    "窄视口媒体查询不能把 Chrome popup 的固定宽度覆盖为 100vw"
+  );
 });
 
 let failed = 0;

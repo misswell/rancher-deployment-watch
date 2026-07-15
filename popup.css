@@ -22,6 +22,7 @@
 body {
   margin: 0;
   width: 780px;
+  min-width: 780px;
   min-height: 520px;
   max-height: 600px;
   color: var(--ink);
@@ -230,10 +231,3 @@ dialog::backdrop { background: rgba(19, 28, 43, 0.45); backdrop-filter: blur(2px
 .two-columns { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
 .dialog-actions { justify-content: flex-end; gap: 8px; margin-top: 18px; }
 .form-error { margin-top: 10px; padding: 9px; border-radius: 8px; color: var(--red); background: var(--red-bg); font-size: 12px; }
-
-@media (max-width: 600px) {
-  body { width: 100vw; }
-  .toolbar, .toolbar-left { align-items: stretch; flex-direction: column; }
-  .search-box { width: 100%; }
-  .cards { grid-template-columns: 1fr; }
-}
