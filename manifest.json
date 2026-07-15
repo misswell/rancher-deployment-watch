@@ -1,0 +1,17 @@
+{
+  "manifest_version": 3,
+  "minimum_chrome_version": "122",
+  "name": "Rancher Deployment Watch",
+  "version": "0.2.0",
+  "description": "集中查看多个 Rancher Cluster 中指定 Deployment 的运行状态。",
+  "permissions": ["activeTab", "alarms", "storage"],
+  "optional_host_permissions": ["https://*/*", "http://*/*"],
+  "background": {
+    "service_worker": "background.js",
+    "type": "module"
+  },
+  "action": {
+    "default_title": "Rancher Deployment Watch",
+    "default_popup": "popup.html"
+  }
+}

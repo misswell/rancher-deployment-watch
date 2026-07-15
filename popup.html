@@ -1,0 +1,90 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Rancher Deployment Watch</title>
+    <link rel="stylesheet" href="popup.css" />
+  </head>
+  <body>
+    <header class="topbar">
+      <div class="brand">
+        <div class="brand-mark" aria-hidden="true">R</div>
+        <div>
+          <h1>Deployment Watch</h1>
+          <p id="summary" aria-live="polite">正在读取监控项…</p>
+        </div>
+      </div>
+      <div class="header-actions">
+        <button class="icon-button" id="refresh" title="立即刷新" aria-label="立即刷新">
+          <span class="refresh-icon">↻</span>
+        </button>
+        <button class="button primary" id="add">＋ 添加监控</button>
+      </div>
+    </header>
+
+    <main>
+      <section id="toolbar" class="toolbar hidden">
+        <div class="toolbar-left">
+          <label class="search-box">
+            <span aria-hidden="true">⌕</span>
+            <input id="watch-search" type="search" autocomplete="off" placeholder="搜索 Cluster、命名空间或 Deployment" aria-label="搜索监控项" />
+          </label>
+          <div class="filters" aria-label="状态筛选">
+            <button class="filter active" data-filter="all" aria-pressed="true">全部</button>
+            <button class="filter" data-filter="problem" aria-pressed="false">仅异常</button>
+          </div>
+        </div>
+        <label class="interval-label">
+          自动刷新
+          <select id="refresh-interval">
+            <option value="0.5">30 秒</option>
+            <option value="1">1 分钟</option>
+            <option value="5">5 分钟</option>
+            <option value="10">10 分钟</option>
+          </select>
+        </label>
+      </section>
+      <section id="content"></section>
+    </main>
+
+    <dialog id="add-dialog">
+      <form method="dialog" id="add-form">
+        <div class="dialog-header">
+          <div>
+            <h2>添加 Deployment</h2>
+            <p>可一次粘贴多个 Rancher Deployment 详情页地址</p>
+          </div>
+          <button type="button" class="icon-button close" id="close-dialog" aria-label="关闭">×</button>
+        </div>
+
+        <label class="field">
+          <span>Deployment 地址（每行一个）</span>
+          <textarea id="deployment-url" rows="5" required placeholder="https://rancher.example.com/dashboard/c/cluster-a/explorer/apps.deployment/test/api#pods&#10;https://rancher.example.com/dashboard/c/cluster-b/explorer/apps.deployment/prod/worker#pods"></textarea>
+          <small id="url-hint">支持批量添加，也可从当前 Rancher 页面自动读取</small>
+        </label>
+
+        <button type="button" class="button secondary full" id="use-current">使用当前标签页</button>
+
+        <div class="two-columns">
+          <label class="field">
+            <span>环境名称（可选，批量共用）</span>
+            <input id="environment-label" placeholder="例如：生产环境" />
+          </label>
+          <label class="field">
+            <span>显示名称（单条时可选）</span>
+            <input id="watch-label" placeholder="例如：同步服务" />
+          </label>
+        </div>
+
+        <div id="form-error" class="form-error hidden" role="alert"></div>
+        <div class="dialog-actions">
+          <button type="button" class="button ghost" id="cancel-dialog">取消</button>
+          <button type="submit" class="button primary" id="save-watch">授权站点并添加</button>
+        </div>
+      </form>
+    </dialog>
+
+    <script type="module" src="popup.js"></script>
+  </body>
+</html>
