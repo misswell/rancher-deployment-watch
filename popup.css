@@ -137,10 +137,11 @@ select { padding: 5px 24px 5px 8px; border: 1px solid var(--line); border-radius
 
 .cluster-group { margin-bottom: 17px; }
 .cluster-title { justify-content: space-between; gap: 12px; margin: 0 2px 8px; }
-.cluster-heading { flex: 1; gap: 8px; min-width: 0; }
-.cluster-title h2 { display: flex; min-width: 0; font-size: 13px; font-weight: 750; }
+.cluster-heading { flex: 1; align-items: center; gap: 8px; min-width: 0; }
+.cluster-title h2 { display: flex; align-items: center; min-width: 0; font-size: 13px; font-weight: 750; line-height: 1.2; }
 .cluster-display-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.cluster-title h2 small { margin-left: 5px; color: var(--muted); font-size: 12px; font-weight: 500; }
+.cluster-title h2 small { margin-left: 5px; color: var(--muted); font-size: 12px; font-weight: 500; line-height: 1.2; white-space: nowrap; }
+.edit-cluster-name { display: inline-flex; align-items: center; flex: 0 0 auto; min-height: 20px; line-height: 1.2; }
 .cluster-actions { flex: 0 0 auto; gap: 8px; }
 .cluster-actions span { color: var(--muted); font-size: 12px; }
 .cluster-refresh { padding: 2px 0; }

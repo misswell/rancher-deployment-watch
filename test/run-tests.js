@@ -363,6 +363,13 @@ test("provides a five-column global overview mode", async () => {
   assert.match(css, /\.compact-mode \.cards\s*\{[^}]*grid-template-columns:\s*repeat\(5,/s);
 });
 
+test("vertically centers the Cluster rename row", async () => {
+  const css = await readFile(new URL("../popup.css", import.meta.url), "utf8");
+  assert.match(css, /\.cluster-heading\s*\{[^}]*align-items:\s*center/s);
+  assert.match(css, /\.cluster-title h2\s*\{[^}]*align-items:\s*center[^}]*line-height:\s*1\.2/s);
+  assert.match(css, /\.edit-cluster-name\s*\{[^}]*display:\s*inline-flex[^}]*align-items:\s*center/s);
+});
+
 test("declares every Chrome icon size", async () => {
   const manifest = JSON.parse(await readFile(new URL("../manifest.json", import.meta.url), "utf8"));
   assert.deepStrictEqual(Object.keys(manifest.icons), ["16", "32", "48", "128"]);
