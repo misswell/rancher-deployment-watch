@@ -8,7 +8,12 @@ import {
   watchId,
   watchMatchesQuery,
   compareWatchesByHealth,
-  clusterKey
+  clusterKey,
+  clusterDisplayName,
+  settingsWithClusterName,
+  refreshSecondsFromSettings,
+  deploymentDisplayName,
+  watchesWithDeploymentName
 } from "./lib/rancher.js";
 
 const content = document.querySelector("#content");
@@ -25,11 +30,27 @@ const formError = document.querySelector("#form-error");
 const intervalSelect = document.querySelector("#refresh-interval");
 const searchInput = document.querySelector("#watch-search");
 const urlHint = document.querySelector("#url-hint");
+const nameDialog = document.querySelector("#name-dialog");
+const nameForm = document.querySelector("#name-form");
+const nameInput = document.querySelector("#name-input");
+const nameDialogTitle = document.querySelector("#name-dialog-title");
+const nameDialogContext = document.querySelector("#name-dialog-context");
+const nameDialogHint = document.querySelector("#name-dialog-hint");
+const nameDialogError = document.querySelector("#name-dialog-error");
+const saveDisplayNameButton = document.querySelector("#save-display-name");
+const resetDisplayNameButton = document.querySelector("#reset-display-name");
 
 let watches = [];
 let results = {};
+let settings = {};
 let filter = "all";
 let searchQuery = "";
+let editingNameTarget = null;
+let liveRefreshTimer = null;
+let refreshInProgress = false;
+let pendingFullRefresh = false;
+const pendingWatchIds = new Set();
+let pendingRefreshWaiters = [];
 const refreshingClusters = new Set();
 
 const statusText = {
@@ -85,7 +106,7 @@ function cardHtml(watch) {
     status: "unknown",
     error: "等待首次刷新…"
   };
-  const displayName = watch.label || watch.deployment;
+  const displayName = deploymentDisplayName(watch);
   const image = result.images?.[0] || "暂无镜像信息";
   const conditionText = result.conditions?.length
     ? result.conditions.map((condition) => `${condition.type} ${condition.status === "True" ? "✓" : condition.reason || condition.status}`).join(" · ")
@@ -122,8 +143,9 @@ function cardHtml(watch) {
       <footer class="card-footer">
         <span class="checked">${relativeTime(result.checkedAt)}</span>
         <div class="card-actions">
-          <button class="link-button open-watch" data-id="${escapeHtml(watchId(watch))}">打开 Rancher</button>
-          <button class="link-button danger remove-watch" data-id="${escapeHtml(watchId(watch))}">移除</button>
+          <button class="link-button open-watch" data-id="${escapeHtml(watchId(watch))}" aria-label="在 Rancher 中打开 ${escapeHtml(displayName)}">打开 Rancher</button>
+          <button class="link-button rename-watch" data-id="${escapeHtml(watchId(watch))}" aria-label="修改 ${escapeHtml(displayName)} 的显示名称">改名</button>
+          <button class="link-button danger remove-watch" data-id="${escapeHtml(watchId(watch))}" aria-label="移除 ${escapeHtml(displayName)} 监控">移除</button>
         </div>
       </footer>
     </article>
@@ -132,6 +154,13 @@ function cardHtml(watch) {
 
 function render() {
   const uiState = captureContentState();
+  const viewMode = settings.viewMode === "compact" ? "compact" : "standard";
+  content.classList.toggle("compact-mode", viewMode === "compact");
+  document.querySelectorAll(".view-mode").forEach((button) => {
+    const active = button.dataset.view === viewMode;
+    button.classList.toggle("active", active);
+    button.setAttribute("aria-pressed", String(active));
+  });
   const healthy = watches.filter((watch) => results[watchId(watch)]?.status === "healthy").length;
   const problems = watches.filter((watch) => isProblem(results[watchId(watch)])).length;
   summary.textContent = watches.length
@@ -155,7 +184,7 @@ function render() {
 
   const visible = watches
     .filter((watch) => filter === "all" || isProblem(results[watchId(watch)]))
-    .filter((watch) => watchMatchesQuery(watch, searchQuery))
+    .filter((watch) => watchMatchesQuery(watch, searchQuery, settings))
     .sort((left, right) => compareWatchesByHealth(left, right, (watch) => results[watchId(watch)]));
   if (!visible.length) {
     const isSearching = searchQuery.trim();
@@ -174,12 +203,15 @@ function render() {
       }, new Map());
   content.innerHTML = [...groups.entries()].map(([key, group]) => {
     const { baseUrl, clusterId } = group[0];
-    const environment = group[0]?.environment || clusterId;
+    const displayName = clusterDisplayName(group[0], settings);
     const problemCount = group.filter((watch) => isProblem(results[watchId(watch)])).length;
     return `
       <section class="cluster-group" data-group-key="${escapeHtml(key)}">
         <div class="cluster-title">
-          <h2>${escapeHtml(environment)} <small>${escapeHtml(clusterId)}</small></h2>
+          <div class="cluster-heading">
+            <h2><span class="cluster-display-name" title="${escapeHtml(displayName)}">${escapeHtml(displayName)}</span><small>${escapeHtml(clusterId)}</small></h2>
+            <button class="link-button edit-cluster-name" data-group-key="${escapeHtml(key)}" aria-label="修改 ${escapeHtml(displayName)} 的显示名称">修改名称</button>
+          </div>
           <div class="cluster-actions">
             <span>${escapeHtml(new URL(baseUrl).host)} · ${group.length} 项${problemCount ? ` · ${problemCount} 异常` : ""}</span>
           <button class="link-button cluster-refresh" data-group-key="${escapeHtml(key)}" ${refreshingClusters.has(key) ? 'aria-busy="true" aria-disabled="true"' : ""}>${refreshingClusters.has(key) ? "刷新中…" : "刷新此 Cluster"}</button>
@@ -204,6 +236,9 @@ function render() {
       render();
     });
   });
+  document.querySelectorAll(".rename-watch").forEach((button) => {
+    button.addEventListener("click", () => openDeploymentNameDialog(button.dataset.id));
+  });
   document.querySelectorAll(".cluster-refresh").forEach((button) => {
     button.addEventListener("click", async () => {
       if (refreshingClusters.has(button.dataset.groupKey)) return;
@@ -220,7 +255,82 @@ function render() {
       }
     });
   });
+  document.querySelectorAll(".edit-cluster-name").forEach((button) => {
+    button.addEventListener("click", () => openClusterNameDialog(button.dataset.groupKey));
+  });
   restoreContentState(uiState);
+}
+
+function openClusterNameDialog(key) {
+  const watch = watches.find((item) => clusterKey(item) === key);
+  if (!watch) return;
+  const customName = settings.clusterNames?.[key] || "";
+  openNameDialog({ type: "cluster", watch }, {
+    title: "修改 Cluster 显示名称",
+    context: `${new URL(watch.baseUrl).host} · ${watch.clusterId}`,
+    hint: "只修改扩展中的显示名称，不影响 Rancher Cluster ID。",
+    value: customName || clusterDisplayName(watch, settings),
+    hasCustomName: Boolean(customName)
+  });
+}
+
+function openDeploymentNameDialog(id) {
+  const watch = watches.find((item) => watchId(item) === id);
+  if (!watch) return;
+  openNameDialog({ type: "deployment", watch }, {
+    title: "修改 Deployment 显示名称",
+    context: `${clusterDisplayName(watch, settings)} · ${watch.namespace}/${watch.deployment}`,
+    hint: "只修改扩展中的显示名称，不影响 Rancher Deployment。",
+    value: deploymentDisplayName(watch),
+    hasCustomName: Boolean(String(watch.label || "").trim())
+  });
+}
+
+function openNameDialog(target, options) {
+  editingNameTarget = target;
+  nameDialogTitle.textContent = options.title;
+  nameDialogContext.textContent = options.context;
+  nameDialogHint.textContent = options.hint;
+  nameInput.value = options.value;
+  nameDialogError.classList.add("hidden");
+  resetDisplayNameButton.classList.toggle("hidden", !options.hasCustomName);
+  nameDialog.showModal();
+  nameInput.select();
+}
+
+async function saveDisplayName(event) {
+  event.preventDefault();
+  await persistDisplayName(nameInput.value);
+}
+
+async function persistDisplayName(name) {
+  if (!editingNameTarget) return nameDialog.close();
+  const { type, watch } = editingNameTarget;
+  const nextSettings = type === "cluster" ? settingsWithClusterName(settings, watch, name) : settings;
+  const nextWatches = type === "deployment" ? watchesWithDeploymentName(watches, watch, name) : watches;
+  nameDialogError.classList.add("hidden");
+  saveDisplayNameButton.disabled = true;
+  resetDisplayNameButton.disabled = true;
+  try {
+    await chrome.storage.local.set(
+      type === "cluster" ? { [SETTINGS_KEY]: nextSettings } : { [WATCHES_KEY]: nextWatches }
+    );
+    settings = nextSettings;
+    watches = nextWatches;
+    editingNameTarget = null;
+    nameDialog.close();
+    render();
+  } catch (error) {
+    nameDialogError.textContent = `保存失败：${error?.message || "无法写入扩展本地存储"}`;
+    nameDialogError.classList.remove("hidden");
+  } finally {
+    saveDisplayNameButton.disabled = false;
+    resetDisplayNameButton.disabled = false;
+  }
+}
+
+async function resetDisplayName() {
+  await persistDisplayName("");
 }
 
 function captureContentState() {
@@ -232,13 +342,18 @@ function captureContentState() {
   const card = active.closest(".deployment-card");
   const cardAction = active.classList.contains("remove-watch")
     ? "remove-watch"
+    : active.classList.contains("rename-watch")
+      ? "rename-watch"
     : active.classList.contains("open-watch")
       ? "open-watch"
       : active.tagName === "SUMMARY" ? "pod-summary" : null;
+  const clusterAction = active.classList.contains("cluster-refresh")
+    ? "cluster-refresh"
+    : active.classList.contains("edit-cluster-name") ? "edit-cluster-name" : null;
   const focus = card && cardAction
     ? { watchId: card.dataset.id, action: cardAction }
-    : active.classList.contains("cluster-refresh")
-      ? { groupKey: active.dataset.groupKey, action: "cluster-refresh" }
+    : clusterAction
+      ? { groupKey: active.dataset.groupKey, action: clusterAction }
       : null;
   return { openDetails, focus };
 }
@@ -253,7 +368,7 @@ function restoreContentState(state) {
     ? [...document.querySelectorAll(state.focus.action === "pod-summary" ? "summary" : `.${state.focus.action}`)].filter(
         (element) => element.closest(".deployment-card")?.dataset.id === state.focus.watchId
       )
-    : [...document.querySelectorAll(".cluster-refresh")].filter(
+    : [...document.querySelectorAll(`.${state.focus.action}`)].filter(
         (button) => button.dataset.groupKey === state.focus.groupKey
       );
   candidates[0]?.focus();
@@ -321,7 +436,9 @@ async function saveWatch(event) {
     const newWatches = parsedWatches.map((parsed) => ({
       ...parsed,
       environment: environmentInput.value.trim() || existingById.get(watchId(parsed))?.environment || parsed.clusterId,
-      label: parsedWatches.length === 1 ? labelInput.value.trim() : existingById.get(watchId(parsed))?.label || "",
+      label: parsedWatches.length === 1
+        ? labelInput.value.trim() || existingById.get(watchId(parsed))?.label || ""
+        : existingById.get(watchId(parsed))?.label || "",
       createdAt: existingById.get(watchId(parsed))?.createdAt || new Date().toISOString()
     }));
     const newIds = new Set(newWatches.map(watchId));
@@ -341,6 +458,12 @@ async function saveWatch(event) {
 }
 
 async function refreshAll(watchIds = null) {
+  if (refreshInProgress) {
+    if (Array.isArray(watchIds)) watchIds.forEach((id) => pendingWatchIds.add(id));
+    else pendingFullRefresh = true;
+    return new Promise((resolve) => pendingRefreshWaiters.push(resolve));
+  }
+  refreshInProgress = true;
   refreshButton.classList.add("refreshing");
   refreshButton.disabled = true;
   content.setAttribute("aria-busy", "true");
@@ -355,14 +478,37 @@ async function refreshAll(watchIds = null) {
     refreshButton.classList.remove("refreshing");
     refreshButton.disabled = false;
     content.removeAttribute("aria-busy");
+    refreshInProgress = false;
+    if (pendingFullRefresh || pendingWatchIds.size) {
+      const nextWatchIds = pendingFullRefresh ? null : [...pendingWatchIds];
+      const waiters = pendingRefreshWaiters;
+      pendingFullRefresh = false;
+      pendingWatchIds.clear();
+      pendingRefreshWaiters = [];
+      refreshAll(nextWatchIds).then((value) => waiters.forEach((resolve) => resolve(value)));
+    } else {
+      const waiters = pendingRefreshWaiters;
+      pendingRefreshWaiters = [];
+      waiters.forEach((resolve) => resolve(results));
+    }
   }
+  return results;
+}
+
+function resetLiveRefreshTimer() {
+  if (liveRefreshTimer) clearInterval(liveRefreshTimer);
+  liveRefreshTimer = setInterval(() => {
+    if (watches.length) refreshAll();
+  }, refreshSecondsFromSettings(settings) * 1000);
 }
 
 async function init() {
   const data = await chrome.storage.local.get([WATCHES_KEY, RESULTS_KEY, SETTINGS_KEY]);
   watches = data[WATCHES_KEY] || [];
   results = data[RESULTS_KEY] || {};
-  intervalSelect.value = String(data[SETTINGS_KEY]?.refreshMinutes || 1);
+  settings = data[SETTINGS_KEY] || {};
+  intervalSelect.value = String(refreshSecondsFromSettings(settings));
+  resetLiveRefreshTimer();
   render();
   if (watches.length) refreshAll();
 }
@@ -374,10 +520,14 @@ urlInput.addEventListener("input", updateUrlHint);
 document.querySelector("#close-dialog").addEventListener("click", () => dialog.close());
 document.querySelector("#cancel-dialog").addEventListener("click", () => dialog.close());
 form.addEventListener("submit", saveWatch);
-document.querySelectorAll(".filter").forEach((button) => {
+nameForm.addEventListener("submit", saveDisplayName);
+resetDisplayNameButton.addEventListener("click", resetDisplayName);
+document.querySelector("#close-name-dialog").addEventListener("click", () => nameDialog.close());
+document.querySelector("#cancel-name-dialog").addEventListener("click", () => nameDialog.close());
+document.querySelectorAll(".filter[data-filter]").forEach((button) => {
   button.addEventListener("click", () => {
     filter = button.dataset.filter;
-    document.querySelectorAll(".filter").forEach((item) => {
+    document.querySelectorAll(".filter[data-filter]").forEach((item) => {
       const active = item === button;
       item.classList.toggle("active", active);
       item.setAttribute("aria-pressed", String(active));
@@ -385,9 +535,30 @@ document.querySelectorAll(".filter").forEach((button) => {
     render();
   });
 });
+document.querySelectorAll(".view-mode").forEach((button) => {
+  button.addEventListener("click", async () => {
+    const nextSettings = { ...settings, viewMode: button.dataset.view };
+    try {
+      await chrome.storage.local.set({ [SETTINGS_KEY]: nextSettings });
+      settings = nextSettings;
+      render();
+    } catch (error) {
+      summary.textContent = `视图设置保存失败：${error?.message || "无法写入本地存储"}`;
+    }
+  });
+});
 intervalSelect.addEventListener("change", async () => {
-  await chrome.storage.local.set({ [SETTINGS_KEY]: { refreshMinutes: Number(intervalSelect.value) } });
-  await chrome.runtime.sendMessage({ type: "reset-alarm" });
+  const { refreshMinutes: _legacyRefreshMinutes, ...currentSettings } = settings;
+  const previousSeconds = refreshSecondsFromSettings(settings);
+  const nextSettings = { ...currentSettings, refreshSeconds: Number(intervalSelect.value) };
+  try {
+    await chrome.storage.local.set({ [SETTINGS_KEY]: nextSettings });
+    settings = nextSettings;
+    resetLiveRefreshTimer();
+  } catch (error) {
+    intervalSelect.value = String(previousSeconds);
+    summary.textContent = `刷新间隔保存失败：${error?.message || "无法写入本地存储"}`;
+  }
 });
 searchInput.addEventListener("input", () => {
   searchQuery = searchInput.value;
@@ -397,6 +568,16 @@ chrome.storage.onChanged.addListener((changes, area) => {
   if (area !== "local") return;
   if (changes[RESULTS_KEY]) {
     results = changes[RESULTS_KEY].newValue || {};
+    render();
+  }
+  if (changes[SETTINGS_KEY]) {
+    settings = changes[SETTINGS_KEY].newValue || {};
+    intervalSelect.value = String(refreshSecondsFromSettings(settings));
+    resetLiveRefreshTimer();
+    render();
+  }
+  if (changes[WATCHES_KEY]) {
+    watches = changes[WATCHES_KEY].newValue || [];
     render();
   }
 });

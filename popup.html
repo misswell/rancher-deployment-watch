@@ -9,7 +9,7 @@
   <body>
     <header class="topbar">
       <div class="brand">
-        <div class="brand-mark" aria-hidden="true">R</div>
+        <img class="brand-mark" src="icons/icon48.png" alt="" aria-hidden="true" />
         <div>
           <h1>Deployment Watch</h1>
           <p id="summary" aria-live="polite">正在读取监控项…</p>
@@ -34,14 +34,21 @@
             <button class="filter active" data-filter="all" aria-pressed="true">全部</button>
             <button class="filter" data-filter="problem" aria-pressed="false">仅异常</button>
           </div>
+          <div class="filters view-switch" aria-label="视图模式">
+            <button class="filter view-mode active" data-view="standard" aria-pressed="true">标准</button>
+            <button class="filter view-mode" data-view="compact" aria-pressed="false">全局</button>
+          </div>
         </div>
-        <label class="interval-label">
+        <label class="interval-label" title="弹窗打开时按所选间隔触发；上次刷新未完成时合并为下一次，Chrome 后台最短约 30 秒">
           自动刷新
           <select id="refresh-interval">
-            <option value="0.5">30 秒</option>
-            <option value="1">1 分钟</option>
-            <option value="5">5 分钟</option>
-            <option value="10">10 分钟</option>
+            <option value="5">5 秒</option>
+            <option value="10">10 秒</option>
+            <option value="15">15 秒</option>
+            <option value="30">30 秒</option>
+            <option value="60">1 分钟</option>
+            <option value="300">5 分钟</option>
+            <option value="600">10 分钟</option>
           </select>
         </label>
       </section>
@@ -81,6 +88,33 @@
         <div class="dialog-actions">
           <button type="button" class="button ghost" id="cancel-dialog">取消</button>
           <button type="submit" class="button primary" id="save-watch">授权站点并添加</button>
+        </div>
+      </form>
+    </dialog>
+
+    <dialog id="name-dialog" class="compact-dialog" aria-labelledby="name-dialog-title" aria-describedby="name-dialog-context">
+      <form method="dialog" id="name-form">
+        <div class="dialog-header">
+          <div>
+            <h2 id="name-dialog-title">修改显示名称</h2>
+            <p id="name-dialog-context"></p>
+          </div>
+          <button type="button" class="icon-button close" id="close-name-dialog" aria-label="关闭">×</button>
+        </div>
+
+        <label class="field">
+          <span>显示名称</span>
+          <input id="name-input" maxlength="40" autocomplete="off" placeholder="输入便于识别的名称" />
+          <small id="name-dialog-hint">只修改扩展中的显示名称，不影响 Rancher 资源。</small>
+        </label>
+
+        <div id="name-dialog-error" class="form-error hidden" role="alert"></div>
+        <div class="dialog-actions split-actions">
+          <button type="button" class="button ghost" id="reset-display-name">恢复默认</button>
+          <div>
+            <button type="button" class="button ghost" id="cancel-name-dialog">取消</button>
+            <button type="submit" class="button primary" id="save-display-name">保存名称</button>
+          </div>
         </div>
       </form>
     </dialog>

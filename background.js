@@ -7,11 +7,11 @@ import {
   summarizeDeployment,
   podsForDeployment,
   readableError,
-  watchId
+  watchId,
+  refreshSecondsFromSettings
 } from "./lib/rancher.js";
 
 const ALARM_NAME = "refresh-deployments";
-const DEFAULT_INTERVAL = 1;
 const refreshVersions = new Map();
 let resultWriteQueue = Promise.resolve();
 
@@ -129,7 +129,7 @@ async function refreshAll(requestedIds = null) {
 
 async function ensureAlarm() {
   const data = await storageGet([SETTINGS_KEY]);
-  const interval = Math.max(0.5, Number(data[SETTINGS_KEY]?.refreshMinutes) || DEFAULT_INTERVAL);
+  const interval = Math.max(0.5, refreshSecondsFromSettings(data[SETTINGS_KEY]) / 60);
   await chrome.alarms.clear(ALARM_NAME);
   await chrome.alarms.create(ALARM_NAME, { periodInMinutes: interval });
 }
@@ -150,7 +150,11 @@ chrome.alarms.onAlarm.addListener((alarm) => {
 
 chrome.storage.onChanged.addListener((changes, area) => {
   if (area !== "local") return;
-  if (changes[SETTINGS_KEY]) ensureAlarm();
+  if (
+    changes[SETTINGS_KEY] &&
+    refreshSecondsFromSettings(changes[SETTINGS_KEY].oldValue) !==
+      refreshSecondsFromSettings(changes[SETTINGS_KEY].newValue)
+  ) ensureAlarm();
   if (changes[WATCHES_KEY]) {
     const previousIds = new Set((changes[WATCHES_KEY].oldValue || []).map(watchId));
     const currentWatches = changes[WATCHES_KEY].newValue || [];

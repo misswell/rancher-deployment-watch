@@ -10,7 +10,12 @@ import {
   watchMatchesQuery,
   compareWatchesByHealth,
   clusterKey,
-  watchId
+  watchId,
+  clusterDisplayName,
+  settingsWithClusterName,
+  refreshSecondsFromSettings,
+  deploymentDisplayName,
+  watchesWithDeploymentName
 } from "../lib/rancher.js";
 
 const tests = [];
@@ -161,6 +166,40 @@ test("matches watches across cluster, namespace, name, label and host", () => {
 
 test("builds a stable cluster identity", () => {
   assert.equal(clusterKey({ baseUrl: "https://rancher.example.com", clusterId: "prod" }), "https%3A%2F%2Francher.example.com::prod");
+});
+
+test("stores and clears an independent Cluster display name", () => {
+  const watch = {
+    baseUrl: "https://rancher.example.com",
+    clusterId: "c-m-prod",
+    environment: "生产环境"
+  };
+  const renamed = settingsWithClusterName({ refreshMinutes: 5 }, watch, "核心生产集群");
+  assert.equal(clusterDisplayName(watch, renamed), "核心生产集群");
+  assert.equal(watchMatchesQuery(watch, "核心生产", renamed), true);
+  assert.equal(renamed.refreshMinutes, 5);
+
+  const cleared = settingsWithClusterName(renamed, watch, "  ");
+  assert.equal(clusterDisplayName(watch, cleared), "生产环境");
+  assert.deepStrictEqual(cleared.clusterNames, {});
+});
+
+test("migrates refresh minutes and supports a five-second interval", () => {
+  assert.equal(refreshSecondsFromSettings({ refreshMinutes: 5 }), 300);
+  assert.equal(refreshSecondsFromSettings({ refreshSeconds: 5 }), 5);
+  assert.equal(refreshSecondsFromSettings({}), 60);
+});
+
+test("stores and clears a Deployment display name without changing its identity", () => {
+  const target = { baseUrl: "https://rancher.example.com", clusterId: "prod", namespace: "pay", deployment: "api" };
+  const other = { ...target, deployment: "worker" };
+  const renamed = watchesWithDeploymentName([target, other], target, "支付接口");
+  assert.equal(deploymentDisplayName(renamed[0]), "支付接口");
+  assert.equal(renamed[0].deployment, "api");
+  assert.equal(renamed[1], other);
+
+  const cleared = watchesWithDeploymentName(renamed, target, "  ");
+  assert.equal(deploymentDisplayName(cleared[0]), "api");
 });
 
 test("sorts problem deployments before healthy deployments", () => {
@@ -315,6 +354,27 @@ test("keeps the Chrome popup at a usable fixed width", async () => {
     /@media[^\{]*\{[\s\S]*?body\s*\{[^}]*width:\s*100vw/s,
     "窄视口媒体查询不能把 Chrome popup 的固定宽度覆盖为 100vw"
   );
+});
+
+test("provides a five-column global overview mode", async () => {
+  const html = await readFile(new URL("../popup.html", import.meta.url), "utf8");
+  const css = await readFile(new URL("../popup.css", import.meta.url), "utf8");
+  assert.match(html, /data-view="compact"[^>]*>全局</);
+  assert.match(css, /\.compact-mode \.cards\s*\{[^}]*grid-template-columns:\s*repeat\(5,/s);
+});
+
+test("declares every Chrome icon size", async () => {
+  const manifest = JSON.parse(await readFile(new URL("../manifest.json", import.meta.url), "utf8"));
+  assert.deepStrictEqual(Object.keys(manifest.icons), ["16", "32", "48", "128"]);
+  for (const [size, path] of Object.entries(manifest.icons)) {
+    const icon = await readFile(new URL(`../${path}`, import.meta.url));
+    assert.ok(icon.length > 100, `${path} 应包含有效 PNG 数据`);
+    assert.equal(icon.subarray(1, 4).toString(), "PNG");
+    assert.equal(icon.readUInt32BE(16), Number(size));
+    assert.equal(icon.readUInt32BE(20), Number(size));
+  }
+  assert.equal(manifest.action.default_icon[16], "icons/icon16.png");
+  assert.equal(manifest.action.default_icon[32], "icons/icon32.png");
 });
 
 let failed = 0;
