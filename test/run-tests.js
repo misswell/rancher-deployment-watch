@@ -384,6 +384,23 @@ test("declares every Chrome icon size", async () => {
   assert.equal(manifest.action.default_icon[32], "icons/icon32.png");
 });
 
+test("declares notifications permission and popup toggle", async () => {
+  const manifest = JSON.parse(await readFile(new URL("../manifest.json", import.meta.url), "utf8"));
+  assert.ok(manifest.permissions.includes("notifications"), "manifest 应声明 notifications 权限");
+
+  const js = await readFile(new URL("../popup.js", import.meta.url), "utf8");
+  assert.match(js, /notifiedWatchIds/, "popup.js 应读写 per-deployment 通知设置");
+  assert.match(js, /notify-toggle-input/, "popup.js 应绑定每个 Deployment 的通知复选框");
+
+  const bg = await readFile(new URL("../background.js", import.meta.url), "utf8");
+  assert.match(bg, /maybeNotifyProblems/, "background.js 应包含通知逻辑");
+  assert.match(bg, /chrome\.notifications\.create/, "background.js 应调用 chrome.notifications.create");
+  assert.match(bg, /notifiedWatchIds/, "background.js 应按 Deployment 选择性通知");
+
+  const html = await readFile(new URL("../popup.html", import.meta.url), "utf8");
+  assert.doesNotMatch(html, /id="notify-problems"/, "全局通知开关应已移除");
+});
+
 let failed = 0;
 for (const { name, run } of tests) {
   try {

@@ -1,0 +1,183 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1280" height="800" viewBox="0 0 1280 800">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#eaf3ff"/>
+      <stop offset="1" stop-color="#f7fbff"/>
+    </linearGradient>
+    <filter id="shadow" x="-20%" y="-20%" width="140%" height="160%">
+      <feDropShadow dx="0" dy="18" stdDeviation="24" flood-color="#17315c" flood-opacity=".18"/>
+    </filter>
+    <style>
+      text { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", sans-serif; fill: #17202a; }
+      .muted { fill: #667085; }
+      .tiny { font-size: 12px; }
+      .small { font-size: 14px; }
+      .medium { font-size: 16px; }
+      .bold { font-weight: 700; }
+      .card { fill: #fff; stroke: #e4e8ee; }
+    </style>
+  </defs>
+  <rect width="1280" height="800" fill="url(#bg)"/>
+  <circle cx="1100" cy="112" r="210" fill="#d7e9ff" opacity=".65"/>
+  <circle cx="120" cy="750" r="230" fill="#e2f5ec" opacity=".72"/>
+
+  <text x="80" y="98" font-size="38" font-weight="750">多个 Cluster，一个全局视图</text>
+  <text x="82" y="133" font-size="18" class="muted">集中查看指定 Deployment 与 Pod 状态，快速发现异常</text>
+  <g transform="translate(1052 92)">
+    <rect width="148" height="34" rx="17" fill="#fff" opacity=".9"/>
+    <circle cx="18" cy="17" r="5" fill="#98a2b3"/>
+    <text x="32" y="22" class="tiny muted">界面示例数据</text>
+  </g>
+
+  <g transform="translate(80 172)" filter="url(#shadow)">
+    <rect width="1120" height="550" rx="18" fill="#f5f7fa"/>
+    <rect width="1120" height="74" rx="18" fill="#fff"/>
+    <rect y="56" width="1120" height="18" fill="#fff"/>
+    <line x1="0" y1="74" x2="1120" y2="74" stroke="#e4e8ee"/>
+    <image href="../icons/icon128.png" x="24" y="19" width="38" height="38"/>
+    <text x="74" y="36" class="medium bold">Deployment Watch</text>
+    <text x="74" y="55" class="tiny muted">8 个监控项 · 7 正常 · 1 异常</text>
+    <g transform="translate(914 20)">
+      <rect width="34" height="34" rx="8" fill="#fff" stroke="#e4e8ee"/>
+      <text x="17" y="24" font-size="21" text-anchor="middle" class="muted">↻</text>
+      <rect x="45" width="137" height="34" rx="8" fill="#1769e0"/>
+      <text x="113" y="22" class="tiny bold" text-anchor="middle" fill="#fff">＋ 添加监控</text>
+    </g>
+
+    <g transform="translate(24 92)">
+      <rect width="390" height="36" rx="9" fill="#fff" stroke="#e4e8ee"/>
+      <text x="14" y="23" class="small muted">⌕</text>
+      <text x="37" y="23" class="tiny muted">搜索 Cluster、命名空间或 Deployment</text>
+      <g transform="translate(425 0)">
+        <rect width="118" height="36" rx="9" fill="#fff" stroke="#e4e8ee"/>
+        <rect x="4" y="4" width="53" height="28" rx="7" fill="#edf4ff"/>
+        <text x="31" y="23" class="tiny bold" text-anchor="middle" fill="#1769e0">全部</text>
+        <text x="87" y="23" class="tiny muted" text-anchor="middle">仅异常</text>
+      </g>
+      <g transform="translate(553 0)">
+        <rect width="118" height="36" rx="9" fill="#fff" stroke="#e4e8ee"/>
+        <text x="31" y="23" class="tiny muted" text-anchor="middle">标准</text>
+        <rect x="61" y="4" width="53" height="28" rx="7" fill="#edf4ff"/>
+        <text x="87" y="23" class="tiny bold" text-anchor="middle" fill="#1769e0">全局</text>
+      </g>
+      <text x="895" y="23" class="tiny muted">自动刷新</text>
+      <rect x="960" width="112" height="36" rx="8" fill="#fff" stroke="#e4e8ee"/>
+      <text x="1016" y="23" class="tiny" text-anchor="middle">5 秒  ▾</text>
+    </g>
+
+    <g transform="translate(26 151)">
+      <text x="0" y="17" class="small bold">生产集群</text>
+      <text x="66" y="17" class="tiny muted">（c-m-prod）</text>
+      <text x="930" y="17" class="tiny muted">5 个 Deployment</text>
+      <text x="1042" y="17" class="tiny" fill="#1769e0">刷新</text>
+    </g>
+
+    <g transform="translate(24 180)">
+      <g>
+        <rect width="204" height="143" rx="10" class="card"/>
+        <text x="12" y="24" class="small bold">同步服务</text>
+        <rect x="150" y="10" width="42" height="22" rx="11" fill="#e9f7ee"/>
+        <text x="171" y="25" class="tiny bold" text-anchor="middle" fill="#16803c">正常</text>
+        <rect x="12" y="44" width="86" height="54" rx="7" fill="#f7f8fa"/>
+        <text x="20" y="65" class="medium bold">3 / 3</text><text x="20" y="85" class="tiny muted">Pod Ready</text>
+        <rect x="106" y="44" width="86" height="54" rx="7" fill="#f7f8fa"/>
+        <text x="114" y="65" class="medium bold">0</text><text x="114" y="85" class="tiny muted">重启</text>
+        <line x1="0" y1="111" x2="204" y2="111" stroke="#edf0f3"/>
+        <text x="12" y="132" class="tiny" fill="#1769e0">打开 Rancher</text>
+      </g>
+      <g transform="translate(216 0)">
+        <rect width="204" height="143" rx="10" class="card"/>
+        <text x="12" y="24" class="small bold">订单 API</text>
+        <rect x="150" y="10" width="42" height="22" rx="11" fill="#e9f7ee"/>
+        <text x="171" y="25" class="tiny bold" text-anchor="middle" fill="#16803c">正常</text>
+        <rect x="12" y="44" width="86" height="54" rx="7" fill="#f7f8fa"/>
+        <text x="20" y="65" class="medium bold">4 / 4</text><text x="20" y="85" class="tiny muted">Pod Ready</text>
+        <rect x="106" y="44" width="86" height="54" rx="7" fill="#f7f8fa"/>
+        <text x="114" y="65" class="medium bold">1</text><text x="114" y="85" class="tiny muted">重启</text>
+        <line x1="0" y1="111" x2="204" y2="111" stroke="#edf0f3"/>
+        <text x="12" y="132" class="tiny" fill="#1769e0">打开 Rancher</text>
+      </g>
+      <g transform="translate(432 0)">
+        <rect width="204" height="143" rx="10" fill="#fff" stroke="#f0c8c3"/>
+        <text x="12" y="24" class="small bold">消息 Worker</text>
+        <rect x="138" y="10" width="54" height="22" rx="11" fill="#fdecea"/>
+        <text x="165" y="25" class="tiny bold" text-anchor="middle" fill="#c43226">不可用</text>
+        <rect x="12" y="44" width="86" height="54" rx="7" fill="#fff5f4"/>
+        <text x="20" y="65" class="medium bold" fill="#c43226">1 / 3</text><text x="20" y="85" class="tiny muted">Pod Ready</text>
+        <rect x="106" y="44" width="86" height="54" rx="7" fill="#fff5f4"/>
+        <text x="114" y="65" class="medium bold" fill="#c43226">12</text><text x="114" y="85" class="tiny muted">重启</text>
+        <line x1="0" y1="111" x2="204" y2="111" stroke="#edf0f3"/>
+        <text x="12" y="132" class="tiny" fill="#1769e0">打开 Rancher</text>
+      </g>
+      <g transform="translate(648 0)">
+        <rect width="204" height="143" rx="10" class="card"/>
+        <text x="12" y="24" class="small bold">文件服务</text>
+        <rect x="150" y="10" width="42" height="22" rx="11" fill="#e9f7ee"/>
+        <text x="171" y="25" class="tiny bold" text-anchor="middle" fill="#16803c">正常</text>
+        <rect x="12" y="44" width="86" height="54" rx="7" fill="#f7f8fa"/>
+        <text x="20" y="65" class="medium bold">2 / 2</text><text x="20" y="85" class="tiny muted">Pod Ready</text>
+        <rect x="106" y="44" width="86" height="54" rx="7" fill="#f7f8fa"/>
+        <text x="114" y="65" class="medium bold">0</text><text x="114" y="85" class="tiny muted">重启</text>
+        <line x1="0" y1="111" x2="204" y2="111" stroke="#edf0f3"/>
+        <text x="12" y="132" class="tiny" fill="#1769e0">打开 Rancher</text>
+      </g>
+      <g transform="translate(864 0)">
+        <rect width="204" height="143" rx="10" class="card"/>
+        <text x="12" y="24" class="small bold">网关</text>
+        <rect x="150" y="10" width="42" height="22" rx="11" fill="#e9f7ee"/>
+        <text x="171" y="25" class="tiny bold" text-anchor="middle" fill="#16803c">正常</text>
+        <rect x="12" y="44" width="86" height="54" rx="7" fill="#f7f8fa"/>
+        <text x="20" y="65" class="medium bold">3 / 3</text><text x="20" y="85" class="tiny muted">Pod Ready</text>
+        <rect x="106" y="44" width="86" height="54" rx="7" fill="#f7f8fa"/>
+        <text x="114" y="65" class="medium bold">0</text><text x="114" y="85" class="tiny muted">重启</text>
+        <line x1="0" y1="111" x2="204" y2="111" stroke="#edf0f3"/>
+        <text x="12" y="132" class="tiny" fill="#1769e0">打开 Rancher</text>
+      </g>
+    </g>
+
+    <g transform="translate(26 350)">
+      <text x="0" y="17" class="small bold">测试集群</text>
+      <text x="66" y="17" class="tiny muted">（c-m-test）</text>
+      <text x="930" y="17" class="tiny muted">3 个 Deployment</text>
+      <text x="1042" y="17" class="tiny" fill="#1769e0">刷新</text>
+    </g>
+    <g transform="translate(24 379)">
+      <g>
+        <rect width="204" height="143" rx="10" class="card"/>
+        <text x="12" y="24" class="small bold">支付适配器</text>
+        <rect x="150" y="10" width="42" height="22" rx="11" fill="#e9f7ee"/>
+        <text x="171" y="25" class="tiny bold" text-anchor="middle" fill="#16803c">正常</text>
+        <rect x="12" y="44" width="86" height="54" rx="7" fill="#f7f8fa"/>
+        <text x="20" y="65" class="medium bold">1 / 1</text><text x="20" y="85" class="tiny muted">Pod Ready</text>
+        <rect x="106" y="44" width="86" height="54" rx="7" fill="#f7f8fa"/>
+        <text x="114" y="65" class="medium bold">0</text><text x="114" y="85" class="tiny muted">重启</text>
+        <line x1="0" y1="111" x2="204" y2="111" stroke="#edf0f3"/>
+        <text x="12" y="132" class="tiny" fill="#1769e0">打开 Rancher</text>
+      </g>
+      <g transform="translate(216 0)">
+        <rect width="204" height="143" rx="10" class="card"/>
+        <text x="12" y="24" class="small bold">通知中心</text>
+        <rect x="150" y="10" width="42" height="22" rx="11" fill="#e9f7ee"/>
+        <text x="171" y="25" class="tiny bold" text-anchor="middle" fill="#16803c">正常</text>
+        <rect x="12" y="44" width="86" height="54" rx="7" fill="#f7f8fa"/>
+        <text x="20" y="65" class="medium bold">2 / 2</text><text x="20" y="85" class="tiny muted">Pod Ready</text>
+        <rect x="106" y="44" width="86" height="54" rx="7" fill="#f7f8fa"/>
+        <text x="114" y="65" class="medium bold">0</text><text x="114" y="85" class="tiny muted">重启</text>
+        <line x1="0" y1="111" x2="204" y2="111" stroke="#edf0f3"/>
+        <text x="12" y="132" class="tiny" fill="#1769e0">打开 Rancher</text>
+      </g>
+      <g transform="translate(432 0)">
+        <rect width="204" height="143" rx="10" class="card"/>
+        <text x="12" y="24" class="small bold">数据导入</text>
+        <rect x="150" y="10" width="42" height="22" rx="11" fill="#e9f7ee"/>
+        <text x="171" y="25" class="tiny bold" text-anchor="middle" fill="#16803c">正常</text>
+        <rect x="12" y="44" width="86" height="54" rx="7" fill="#f7f8fa"/>
+        <text x="20" y="65" class="medium bold">1 / 1</text><text x="20" y="85" class="tiny muted">Pod Ready</text>
+        <rect x="106" y="44" width="86" height="54" rx="7" fill="#f7f8fa"/>
+        <text x="114" y="65" class="medium bold">0</text><text x="114" y="85" class="tiny muted">重启</text>
+        <line x1="0" y1="111" x2="204" y2="111" stroke="#edf0f3"/>
+        <text x="12" y="132" class="tiny" fill="#1769e0">打开 Rancher</text>
+      </g>
+    </g>
+  </g>
+</svg>

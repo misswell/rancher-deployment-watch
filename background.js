@@ -75,6 +75,78 @@ async function updateBadge(results) {
   await chrome.action.setBadgeText({ text: problemCount ? String(problemCount) : values.length ? "✓" : "" });
 }
 
+function isProblemResult(result) {
+  return !result?.ok || ["degraded", "unavailable", "unknown"].includes(result?.status);
+}
+
+function watchLabel(watch, settings = {}) {
+  const display = String(watch?.label || "").trim();
+  if (display) return display;
+  const env = String(watch?.environment || "").trim();
+  const cluster = String(settings?.clusterNames?.[[
+    encodeURIComponent(watch?.baseUrl || ""),
+    encodeURIComponent(watch?.clusterId || "")
+  ].join("::")] || "").trim();
+  return [env || cluster || watch?.clusterId, watch?.namespace, watch?.deployment]
+    .filter(Boolean)
+    .join(" / ");
+}
+
+function describeProblem(result) {
+  if (!result?.ok) return result?.error || "请求失败";
+  switch (result.status) {
+    case "unavailable": return `不可用：${result.ready || 0}/${result.desired || 0} 就绪`;
+    case "degraded": return `有风险：${result.ready || 0}/${result.desired || 0} 就绪${result.restarts ? `，重启 ${result.restarts}` : ""}`;
+    case "unknown": return "状态未知";
+    default: return result.status || "异常";
+  }
+}
+
+async function maybeNotifyProblems(watches, results, settings) {
+  const optedInIds = new Set(Object.keys(settings?.notifiedWatchIds || {}));
+  if (!optedInIds.size) return;
+  const { notifiedProblems = {} } = await storageGet(["notifiedProblems"]);
+  const currentProblemIds = new Set(
+    watches
+      .filter((watch) => optedInIds.has(watchId(watch)) && isProblemResult(results[watchId(watch)]))
+      .map(watchId)
+  );
+
+  const newlyBroken = watches.filter(
+    (watch) => currentProblemIds.has(watchId(watch)) && !notifiedProblems[watchId(watch)]
+  );
+
+  if (newlyBroken.length) {
+    const firstWatch = newlyBroken[0];
+    const title = newlyBroken.length === 1
+      ? `${watchLabel(firstWatch, settings)} 状态异常`
+      : `${newlyBroken.length} 个 Deployment 状态异常`;
+    const body = newlyBroken.slice(0, 5).map(
+      (watch) => `${watchLabel(watch, settings)}：${describeProblem(results[watchId(watch)])}`
+    ).join("\n");
+
+    try {
+      await chrome.notifications.create("rancher-problem", {
+        type: "basic",
+        iconUrl: chrome.runtime.getURL("icons/icon128.png"),
+        title,
+        message: body,
+        priority: 2,
+        requireInteraction: false
+      });
+    } catch (error) {
+      console.warn("通知发送失败", error?.message || error);
+    }
+  }
+
+  const nextNotified = Object.fromEntries(
+    [...currentProblemIds].map((id) => [id, true])
+  );
+  if (JSON.stringify(nextNotified) !== JSON.stringify(notifiedProblems)) {
+    await chrome.storage.local.set({ notifiedProblems: nextNotified });
+  }
+}
+
 function enqueueResultWrite(operation) {
   const queued = resultWriteQueue.then(operation);
   resultWriteQueue = queued.catch(() => {});
@@ -112,6 +184,7 @@ async function refreshAndCommit(watch) {
     );
     await chrome.storage.local.set({ [RESULTS_KEY]: results });
     await updateBadge(results);
+    await maybeNotifyProblems(currentWatches, results, (await storageGet([SETTINGS_KEY]))[SETTINGS_KEY] || {});
   });
 }
 
@@ -124,7 +197,10 @@ async function refreshAll(requestedIds = null) {
     : watches;
   await reconcileResults(watches);
   await Promise.all(selectedWatches.map(refreshAndCommit));
-  return (await storageGet([RESULTS_KEY]))[RESULTS_KEY] || {};
+  const finalData = await storageGet([RESULTS_KEY, SETTINGS_KEY]);
+  const finalResults = finalData[RESULTS_KEY] || {};
+  await maybeNotifyProblems(watches, finalResults, finalData[SETTINGS_KEY] || {});
+  return finalResults;
 }
 
 async function ensureAlarm() {

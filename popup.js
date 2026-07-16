@@ -130,7 +130,13 @@ function cardHtml(watch) {
             <h3 title="${escapeHtml(displayName)}">${escapeHtml(displayName)}</h3>
             <p>${escapeHtml(watch.namespace)} / ${escapeHtml(watch.deployment)}</p>
           </div>
-          <span class="status ${escapeHtml(result.status)}">${statusText[result.status] || "未知"}</span>
+          <div class="card-top-right">
+            <label class="card-notify" title="该 Deployment 出现异常时弹出浏览器通知">
+              <input type="checkbox" class="notify-toggle-input" data-id="${escapeHtml(watchId(watch))}" ${settings.notifiedWatchIds?.[watchId(watch)] ? "checked" : ""} />
+              <span class="card-notify-icon" aria-hidden="true">🔔</span>
+            </label>
+            <span class="status ${escapeHtml(result.status)}">${statusText[result.status] || "未知"}</span>
+          </div>
         </div>
         ${metrics}
       </div>
@@ -140,10 +146,10 @@ function cardHtml(watch) {
           <div class="pod-list">${podRows(result.pods)}</div>
         </details>
       ` : ""}
-      <footer class="card-footer">
-        <span class="checked">${relativeTime(result.checkedAt)}</span>
-        <div class="card-actions">
-          <button class="link-button open-watch" data-id="${escapeHtml(watchId(watch))}" aria-label="在 Rancher 中打开 ${escapeHtml(displayName)}">打开 Rancher</button>
+     <footer class="card-footer">
+       <span class="checked">${relativeTime(result.checkedAt)}</span>
+       <div class="card-actions">
+         <button class="link-button open-watch" data-id="${escapeHtml(watchId(watch))}" aria-label="在 Rancher 中打开 ${escapeHtml(displayName)}">打开 Rancher</button>
           <button class="link-button rename-watch" data-id="${escapeHtml(watchId(watch))}" aria-label="修改 ${escapeHtml(displayName)} 的显示名称">改名</button>
           <button class="link-button danger remove-watch" data-id="${escapeHtml(watchId(watch))}" aria-label="移除 ${escapeHtml(displayName)} 监控">移除</button>
         </div>
@@ -238,6 +244,22 @@ function render() {
   });
   document.querySelectorAll(".rename-watch").forEach((button) => {
     button.addEventListener("click", () => openDeploymentNameDialog(button.dataset.id));
+  });
+  document.querySelectorAll(".notify-toggle-input").forEach((checkbox) => {
+    checkbox.addEventListener("change", async () => {
+      const id = checkbox.dataset.id;
+      const notifiedWatchIds = { ...(settings.notifiedWatchIds || {}) };
+      if (checkbox.checked) notifiedWatchIds[id] = true;
+      else delete notifiedWatchIds[id];
+      const nextSettings = { ...settings, notifiedWatchIds };
+      try {
+        await chrome.storage.local.set({ [SETTINGS_KEY]: nextSettings });
+        settings = nextSettings;
+      } catch (error) {
+        checkbox.checked = !checkbox.checked;
+        summary.textContent = `通知设置保存失败：${error?.message || "无法写入本地存储"}`;
+      }
+    });
   });
   document.querySelectorAll(".cluster-refresh").forEach((button) => {
     button.addEventListener("click", async () => {

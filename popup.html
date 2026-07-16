@@ -24,23 +24,23 @@
     </header>
 
     <main>
-      <section id="toolbar" class="toolbar hidden">
-        <div class="toolbar-left">
-          <label class="search-box">
-            <span aria-hidden="true">⌕</span>
-            <input id="watch-search" type="search" autocomplete="off" placeholder="搜索 Cluster、命名空间或 Deployment" aria-label="搜索监控项" />
-          </label>
-          <div class="filters" aria-label="状态筛选">
-            <button class="filter active" data-filter="all" aria-pressed="true">全部</button>
-            <button class="filter" data-filter="problem" aria-pressed="false">仅异常</button>
-          </div>
-          <div class="filters view-switch" aria-label="视图模式">
-            <button class="filter view-mode active" data-view="standard" aria-pressed="true">标准</button>
-            <button class="filter view-mode" data-view="compact" aria-pressed="false">全局</button>
-          </div>
+    <section id="toolbar" class="toolbar hidden">
+      <div class="toolbar-left">
+        <label class="search-box">
+          <span aria-hidden="true">⌕</span>
+          <input id="watch-search" type="search" autocomplete="off" placeholder="搜索 Cluster、命名空间或 Deployment" aria-label="搜索监控项" />
+        </label>
+        <div class="filters" aria-label="状态筛选">
+          <button class="filter active" data-filter="all" aria-pressed="true">全部</button>
+          <button class="filter" data-filter="problem" aria-pressed="false">仅异常</button>
         </div>
+        <div class="filters view-switch" aria-label="视图模式">
+          <button class="filter view-mode active" data-view="standard" aria-pressed="true">标准</button>
+          <button class="filter view-mode" data-view="compact" aria-pressed="false">全局</button>
+        </div>
+      </div>
+      <div class="toolbar-right">
         <label class="interval-label" title="弹窗打开时按所选间隔触发；上次刷新未完成时合并为下一次，Chrome 后台最短约 30 秒">
-          自动刷新
           <select id="refresh-interval">
             <option value="5">5 秒</option>
             <option value="10">10 秒</option>
@@ -51,7 +51,8 @@
             <option value="600">10 分钟</option>
           </select>
         </label>
-      </section>
+      </div>
+    </section>
       <section id="content"></section>
     </main>
 
