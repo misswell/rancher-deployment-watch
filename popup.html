@@ -16,14 +16,33 @@
         </div>
       </div>
       <div class="header-actions">
+        <button class="button ghost" id="remember-login" title="让当前 Rancher 登录在关闭并重新打开浏览器后继续有效（约 30 天）" aria-pressed="false">
+          <span class="remember-login-label">保持登录</span>
+        </button>
+        <button class="button ghost" id="pause-toggle" title="暂停后不再发起任何 Rancher 请求，适合不在内网或无网络时使用" aria-pressed="false">
+          <span class="pause-label">暂停监控</span>
+        </button>
         <button class="icon-button" id="refresh" title="立即刷新" aria-label="立即刷新">
           <span class="refresh-icon">↻</span>
+        </button>
+        <button class="icon-button" id="config-menu" title="导出或导入监控配置" aria-label="导出或导入监控配置" aria-haspopup="dialog">
+          <span aria-hidden="true">⚙</span>
         </button>
         <button class="button primary" id="add">＋ 添加监控</button>
       </div>
     </header>
 
     <main>
+    <div id="pause-banner" class="pause-banner hidden" role="status">
+      <div class="pause-banner-main">
+        <span class="pause-banner-icon" aria-hidden="true">⏸</span>
+        <div>
+          <strong>监控已暂停</strong>
+          <p>不会发起任何 Rancher 请求，已有状态保持不变。不在内网或无网络时可开启，以避免无效请求与异常通知。</p>
+        </div>
+      </div>
+      <button class="button primary" id="resume-from-banner">继续监控</button>
+    </div>
     <section id="toolbar" class="toolbar hidden">
       <div class="toolbar-left">
         <label class="search-box">
@@ -37,6 +56,7 @@
         <div class="filters view-switch" aria-label="视图模式">
           <button class="filter view-mode active" data-view="standard" aria-pressed="true">标准</button>
           <button class="filter view-mode" data-view="compact" aria-pressed="false">全局</button>
+          <button class="filter view-mode" data-view="timeline" aria-pressed="false">时间线</button>
         </div>
       </div>
       <div class="toolbar-right">
@@ -73,6 +93,7 @@
         </label>
 
         <button type="button" class="button secondary full" id="use-current">使用当前标签页</button>
+        <button type="button" class="button ghost full" id="browse-deployments">浏览 Cluster 与 Deployment…</button>
 
         <div class="two-columns">
           <label class="field">
@@ -89,6 +110,58 @@
         <div class="dialog-actions">
           <button type="button" class="button ghost" id="cancel-dialog">取消</button>
           <button type="submit" class="button primary" id="save-watch">授权站点并添加</button>
+        </div>
+      </form>
+    </dialog>
+
+    <dialog id="discover-dialog" aria-labelledby="discover-dialog-title">
+      <form method="dialog" id="discover-form">
+        <div class="dialog-header">
+          <div>
+            <h2 id="discover-dialog-title">发现服务</h2>
+            <p>直接浏览 Rancher 里的 Cluster 与 Deployment，勾选后批量加入监控。<span id="discover-build" class="build-tag"></span></p>
+          </div>
+          <button type="button" class="icon-button close" id="close-discover-dialog" aria-label="关闭">×</button>
+        </div>
+
+        <div class="discover-picker">
+          <label class="field">
+            <span>Rancher 站点</span>
+            <select id="discover-site"></select>
+          </label>
+          <label class="field">
+            <span>Cluster</span>
+            <select id="discover-cluster"></select>
+          </label>
+          <button type="button" class="button ghost" id="discover-use-tab" title="用当前标签页里的 Rancher 地址作为站点">用当前标签页</button>
+        </div>
+
+        <div class="discover-tools">
+          <label class="search-box">
+            <span aria-hidden="true">⌕</span>
+            <input id="discover-search" type="search" autocomplete="off" placeholder="搜索命名空间或 Deployment" aria-label="搜索可添加的 Deployment" />
+          </label>
+          <label class="discover-toggle" title="默认隐藏 kube-*、cattle-*、fleet-*、rancher-* 等系统命名空间">
+            <input type="checkbox" id="discover-system" />
+            <span>系统命名空间</span>
+          </label>
+          <button type="button" class="button ghost" id="discover-grant" title="申请该 Rancher 站点权限并重新读取列表">授权并重试</button>
+        </div>
+
+        <div id="discover-status" class="discover-status" role="status" aria-live="polite">正在读取 Cluster 列表…</div>
+        <div id="discover-list" class="discover-list"></div>
+        <div id="discover-error" class="form-error hidden" role="alert"></div>
+
+        <div class="dialog-actions split-actions">
+          <div class="discover-count">
+            <span id="discover-selected-count">已选 0 项</span>
+            <button type="button" class="link-button" id="discover-select-shown">全选当前结果</button>
+            <button type="button" class="link-button" id="discover-clear-selection">清空</button>
+          </div>
+          <div>
+            <button type="button" class="button ghost" id="cancel-discover-dialog">取消</button>
+            <button type="button" class="button primary" id="discover-add" disabled>添加到监控</button>
+          </div>
         </div>
       </form>
     </dialog>
@@ -115,6 +188,44 @@
           <div>
             <button type="button" class="button ghost" id="cancel-name-dialog">取消</button>
             <button type="submit" class="button primary" id="save-display-name">保存名称</button>
+          </div>
+        </div>
+      </form>
+    </dialog>
+
+    <dialog id="config-dialog" class="compact-dialog" aria-labelledby="config-dialog-title">
+      <form method="dialog" id="config-form">
+        <div class="dialog-header">
+          <div>
+            <h2 id="config-dialog-title">导出与导入配置</h2>
+            <p>配置只含监控项地址、显示名称、刷新间隔、暂停与通知开关，不含 Cookie 或任何凭据。</p>
+          </div>
+          <button type="button" class="icon-button close" id="close-config-dialog" aria-label="关闭">×</button>
+        </div>
+
+        <div class="config-section">
+          <strong>导出</strong>
+          <small id="export-count">暂无监控项</small>
+          <button type="button" class="button secondary full" id="export-config">导出为 JSON 文件</button>
+        </div>
+
+        <div class="config-section">
+          <strong>导入</strong>
+          <small id="import-summary">选择之前导出的 JSON 文件，导入后会立即按配置刷新。</small>
+          <input type="file" id="import-file" class="hidden" accept="application/json,.json" />
+          <button type="button" class="button secondary full" id="pick-config-file">选择配置文件</button>
+          <div id="import-mode" class="import-mode hidden">
+            <label><input type="radio" name="import-mode" value="merge" checked />合并：保留本机监控项，重复项以文件为准</label>
+            <label><input type="radio" name="import-mode" value="replace" />替换：先清空本机监控项，只保留文件内容</label>
+          </div>
+        </div>
+
+        <div id="config-error" class="form-error hidden" role="alert"></div>
+        <div class="dialog-actions split-actions">
+          <span id="config-message" class="config-message" role="status" aria-live="polite"></span>
+          <div>
+            <button type="button" class="button ghost" id="cancel-config-dialog">关闭</button>
+            <button type="button" class="button primary" id="confirm-import" disabled>确认导入</button>
           </div>
         </div>
       </form>

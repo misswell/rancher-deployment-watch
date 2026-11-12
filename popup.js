@@ -2,24 +2,45 @@ import {
   WATCHES_KEY,
   RESULTS_KEY,
   SETTINGS_KEY,
+  HISTORY_KEY,
   parseDeploymentUrl,
   parseDeploymentUrls,
   permissionPattern,
   watchId,
   watchMatchesQuery,
-  compareWatchesByHealth,
+  compareWatchesByLastReady,
+  sortedTimeline,
   clusterKey,
   clusterDisplayName,
   settingsWithClusterName,
   refreshSecondsFromSettings,
   deploymentDisplayName,
-  watchesWithDeploymentName
+  watchesWithDeploymentName,
+  isMonitoringPaused,
+  settingsWithMonitoringPaused,
+  buildConfigExport,
+  parseConfigImport,
+  applyConfigImport,
+  configExportFilename,
+  isSystemNamespace,
+  discoveryRowMatches,
+  discoveredDeploymentToWatch,
+  mergeMonitors,
+  clusterFromUrl,
+  mergeClusterSources,
+  DISCOVERY_MAX_NAMESPACES,
+  DISCOVERY_PAGE_SIZE,
+  DISCOVERY_MAX_PAGES
 } from "./lib/rancher.js";
 
 const content = document.querySelector("#content");
 const toolbar = document.querySelector("#toolbar");
 const summary = document.querySelector("#summary");
 const refreshButton = document.querySelector("#refresh");
+const pauseButton = document.querySelector("#pause-toggle");
+const rememberLoginButton = document.querySelector("#remember-login");
+const pauseBanner = document.querySelector("#pause-banner");
+const resumeFromBannerButton = document.querySelector("#resume-from-banner");
 const addButton = document.querySelector("#add");
 const dialog = document.querySelector("#add-dialog");
 const form = document.querySelector("#add-form");
@@ -39,13 +60,58 @@ const nameDialogHint = document.querySelector("#name-dialog-hint");
 const nameDialogError = document.querySelector("#name-dialog-error");
 const saveDisplayNameButton = document.querySelector("#save-display-name");
 const resetDisplayNameButton = document.querySelector("#reset-display-name");
+const configButton = document.querySelector("#config-menu");
+const configDialog = document.querySelector("#config-dialog");
+const configForm = document.querySelector("#config-form");
+const exportCount = document.querySelector("#export-count");
+const exportButton = document.querySelector("#export-config");
+const pickFileButton = document.querySelector("#pick-config-file");
+const importFile = document.querySelector("#import-file");
+const importSummary = document.querySelector("#import-summary");
+const importMode = document.querySelector("#import-mode");
+const confirmImportButton = document.querySelector("#confirm-import");
+const configError = document.querySelector("#config-error");
+const configMessage = document.querySelector("#config-message");
+const browseButton = document.querySelector("#browse-deployments");
+const discoverDialog = document.querySelector("#discover-dialog");
+const discoverForm = document.querySelector("#discover-form");
+const discoverSiteSelect = document.querySelector("#discover-site");
+const discoverClusterSelect = document.querySelector("#discover-cluster");
+const discoverUseTabButton = document.querySelector("#discover-use-tab");
+const discoverSearchInput = document.querySelector("#discover-search");
+const discoverSystemInput = document.querySelector("#discover-system");
+const discoverGrantButton = document.querySelector("#discover-grant");
+const discoverStatus = document.querySelector("#discover-status");
+const discoverList = document.querySelector("#discover-list");
+const discoverError = document.querySelector("#discover-error");
+const discoverBuild = document.querySelector("#discover-build");
+const discoverSelectedCount = document.querySelector("#discover-selected-count");
+const discoverSelectShownButton = document.querySelector("#discover-select-shown");
+const discoverClearButton = document.querySelector("#discover-clear-selection");
+const discoverAddButton = document.querySelector("#discover-add");
 
 let watches = [];
 let results = {};
 let settings = {};
+let history = [];
 let filter = "all";
 let searchQuery = "";
 let editingNameTarget = null;
+let pendingImport = null;
+let discoverSites = [];
+let discoverClusters = [];
+let discoverRows = [];
+let discoverTruncated = false;
+let discoverSource = "";
+let discoverSkipped = 0;
+let discoverNamespacesRead = 0;
+let discoverClusterNotice = "";
+let discoverTabCluster = null;
+let discoverFailed = false;
+let discoverQuery = "";
+let discoverShowSystem = false;
+const discoverSelection = new Map();
+const discoverWatchIndex = new Map();
 let liveRefreshTimer = null;
 let refreshInProgress = false;
 let pendingFullRefresh = false;
@@ -60,6 +126,37 @@ const statusText = {
   paused: "已暂停",
   unknown: "未知"
 };
+
+function paused() {
+  return isMonitoringPaused(settings);
+}
+
+function updatePauseButton() {
+  const isPaused = paused();
+  pauseButton.classList.toggle("paused", isPaused);
+  pauseButton.setAttribute("aria-pressed", String(isPaused));
+  pauseButton.querySelector(".pause-label").textContent = isPaused ? "继续监控" : "暂停监控";
+  pauseButton.title = isPaused
+    ? "恢复后台与弹窗的定时刷新"
+    : "暂停后不再发起任何 Rancher 请求，适合不在内网或无网络时使用";
+  pauseBanner.classList.toggle("hidden", !isPaused || !watches.length);
+  refreshButton.disabled = isPaused;
+  if (isPaused) {
+    refreshButton.title = "监控已暂停，先继续监控再刷新";
+  } else {
+    refreshButton.title = "立即刷新";
+  }
+}
+
+function updateRememberLoginButton() {
+  const enabled = settings.rememberLogin === true;
+  rememberLoginButton.classList.toggle("active", enabled);
+  rememberLoginButton.setAttribute("aria-pressed", String(enabled));
+  rememberLoginButton.querySelector(".remember-login-label").textContent = enabled ? "已保持登录" : "保持登录";
+  rememberLoginButton.title = enabled
+    ? "已将 Rancher 会话 Cookie 设为约 30 天有效；服务端过期或主动退出仍会结束登录"
+    : "让当前 Rancher 登录在关闭并重新打开浏览器后继续有效（约 30 天）";
+}
 
 function escapeHtml(value = "") {
   return String(value)
@@ -77,6 +174,26 @@ function relativeTime(iso) {
   if (seconds < 60) return `${seconds} 秒前`;
   if (seconds < 3600) return `${Math.floor(seconds / 60)} 分钟前`;
   return `${Math.floor(seconds / 3600)} 小时前`;
+}
+
+function readyTimeLabel(iso) {
+  if (!iso) return "尚未就绪";
+  const text = relativeTime(iso).replace("检查", "").trim();
+  return `就绪 ${text || "刚刚"}`;
+}
+
+function timelineTime(iso) {
+  const time = Date.parse(iso || "");
+  if (Number.isNaN(time)) return "未知时间";
+  const date = new Date(time);
+  const pad = (value) => String(value).padStart(2, "0");
+  return `${pad(date.getMonth() + 1)}-${pad(date.getDate())} ${pad(date.getHours())}:${pad(date.getMinutes())}:${pad(date.getSeconds())}`;
+}
+
+function timelineNote(event) {
+  if (event.status === "unknown") return event.error || "请求失败";
+  if (event.ready !== null && event.desired !== null) return `${event.ready}/${event.desired} 就绪`;
+  return "";
 }
 
 function isProblem(result) {
@@ -147,7 +264,10 @@ function cardHtml(watch) {
         </details>
       ` : ""}
      <footer class="card-footer">
-       <span class="checked">${relativeTime(result.checkedAt)}</span>
+       <span class="card-times">
+         <span class="checked">${relativeTime(result.checkedAt)}</span>
+         <span class="ready-at" title="最近一次全部就绪的时间">${escapeHtml(readyTimeLabel(result.lastReadyAt))}</span>
+       </span>
        <div class="card-actions">
          <button class="link-button open-watch" data-id="${escapeHtml(watchId(watch))}" aria-label="在 Rancher 中打开 ${escapeHtml(displayName)}">打开 Rancher</button>
           <button class="link-button rename-watch" data-id="${escapeHtml(watchId(watch))}" aria-label="修改 ${escapeHtml(displayName)} 的显示名称">改名</button>
@@ -158,10 +278,75 @@ function cardHtml(watch) {
   `;
 }
 
+function renderTimeline() {
+  const active = new Map(watches.map((watch) => [watchId(watch), watch]));
+  const allowed = new Set(
+    watches
+      .filter((watch) => watchMatchesQuery(watch, searchQuery, settings))
+      .map(watchId)
+  );
+  let events = sortedTimeline(history).filter((event) => active.has(event.id) && allowed.has(event.id));
+  if (filter === "problem") {
+    events = events.filter((event) => ["degraded", "unavailable", "unknown"].includes(event.status));
+  }
+  events = events.slice(0, 200);
+  if (!events.length) {
+    const empty = filter === "problem"
+      ? { icon: "✓", title: "时间线里没有异常记录", text: "已记录的就绪事件都处于正常状态，切回“全部”可以查看完整历史。" }
+      : { icon: "⏱", title: "还没有就绪记录", text: "保持监控运行，Deployment 每次就绪或状态切换都会记录到这条时间线上，最后就绪的排在最上面。" };
+    content.innerHTML = `
+      <div class="empty-state">
+        <div>
+          <div class="empty-icon">${empty.icon}</div>
+          <h2>${empty.title}</h2>
+          <p>${empty.text}</p>
+        </div>
+      </div>`;
+    return;
+  }
+  const items = events.map((event) => {
+    const watch = active.get(event.id);
+    const note = timelineNote(event);
+    return `
+      <li class="timeline-item status-${escapeHtml(event.status)}" data-id="${escapeHtml(event.id)}">
+        <span class="timeline-dot" aria-hidden="true"></span>
+        <div class="timeline-card">
+          <div class="timeline-head">
+            <time class="timeline-time" datetime="${escapeHtml(event.at)}">${escapeHtml(timelineTime(event.at))}</time>
+            <span class="status ${escapeHtml(event.status)}">${statusText[event.status] || "未知"}</span>
+          </div>
+          <div class="timeline-title">
+            <strong>${escapeHtml(deploymentDisplayName(watch))}</strong>
+            <span class="timeline-place">${escapeHtml(clusterDisplayName(watch, settings))} · ${escapeHtml(watch.namespace)}/${escapeHtml(watch.deployment)}</span>
+          </div>
+          ${note ? `<div class="timeline-note">${escapeHtml(note)}</div>` : ""}
+          <button class="link-button timeline-open" data-id="${escapeHtml(event.id)}">打开 Rancher</button>
+        </div>
+      </li>`;
+  }).join("");
+  content.innerHTML = `
+    <section class="timeline">
+      <div class="timeline-header">
+        <h2>历史时间线</h2>
+        <span>最近 ${events.length} 条 · 按就绪时间排序</span>
+      </div>
+      <ol class="timeline-list">${items}</ol>
+    </section>`;
+  content.querySelectorAll(".timeline-open").forEach((button) => {
+    button.addEventListener("click", () => {
+      const watch = watches.find((item) => watchId(item) === button.dataset.id);
+      if (watch) chrome.tabs.create({ url: watch.sourceUrl });
+    });
+  });
+}
+
 function render() {
   const uiState = captureContentState();
-  const viewMode = settings.viewMode === "compact" ? "compact" : "standard";
+  const viewMode = settings.viewMode === "compact"
+    ? "compact"
+    : settings.viewMode === "timeline" ? "timeline" : "standard";
   content.classList.toggle("compact-mode", viewMode === "compact");
+  content.classList.toggle("timeline-mode", viewMode === "timeline");
   document.querySelectorAll(".view-mode").forEach((button) => {
     const active = button.dataset.view === viewMode;
     button.classList.toggle("active", active);
@@ -169,10 +354,14 @@ function render() {
   });
   const healthy = watches.filter((watch) => results[watchId(watch)]?.status === "healthy").length;
   const problems = watches.filter((watch) => isProblem(results[watchId(watch)])).length;
-  summary.textContent = watches.length
-    ? `${watches.length} 个监控项 · ${healthy} 正常${problems ? ` · ${problems} 异常` : ""}`
-    : "跨 Cluster 状态面板";
+  summary.textContent = !watches.length
+    ? "跨 Cluster 状态面板"
+    : paused()
+      ? `监控已暂停 · ${watches.length} 个监控项 · 保留上次状态`
+      : `${watches.length} 个监控项 · ${healthy} 正常${problems ? ` · ${problems} 异常` : ""}`;
   toolbar.classList.toggle("hidden", watches.length === 0);
+  updatePauseButton();
+  updateRememberLoginButton();
 
   if (!watches.length) {
     content.innerHTML = `
@@ -180,18 +369,25 @@ function render() {
         <div>
           <div class="empty-icon">＋</div>
           <h2>还没有监控项</h2>
-          <p>打开任意 Rancher Deployment 详情页，然后使用“添加监控”读取当前页面；也可以直接粘贴详情页地址。</p>
+          <p>在“添加监控”里点“浏览 Cluster 与 Deployment…”，直接勾选要监控的服务；也可以粘贴 Deployment 详情页地址。</p>
           <button class="button primary" id="empty-add">添加第一个 Deployment</button>
+          <p>换电脑或换浏览器时，点击右上角 ⚙ 导入之前导出的配置文件。</p>
         </div>
       </div>`;
     document.querySelector("#empty-add").addEventListener("click", openAddDialog);
     return;
   }
 
+  if (viewMode === "timeline") {
+    renderTimeline();
+    restoreContentState(uiState);
+    return;
+  }
+
   const visible = watches
     .filter((watch) => filter === "all" || isProblem(results[watchId(watch)]))
     .filter((watch) => watchMatchesQuery(watch, searchQuery, settings))
-    .sort((left, right) => compareWatchesByHealth(left, right, (watch) => results[watchId(watch)]));
+    .sort((left, right) => compareWatchesByLastReady(left, right, (watch) => results[watchId(watch)]));
   if (!visible.length) {
     const isSearching = searchQuery.trim();
     content.innerHTML = isSearching
@@ -355,6 +551,110 @@ async function resetDisplayName() {
   await persistDisplayName("");
 }
 
+function showConfigError(message) {
+  configError.textContent = message;
+  configError.classList.toggle("hidden", !message);
+}
+
+function updateImportSelection() {
+  const ready = Boolean(pendingImport);
+  confirmImportButton.disabled = !ready;
+  importMode.classList.toggle("hidden", !ready);
+  if (ready) {
+    const clusters = new Set(pendingImport.watches.map(clusterKey)).size;
+    const sites = new Set(pendingImport.watches.map((watch) => watch.baseUrl)).size;
+    const notified = Object.keys(pendingImport.settings.notifiedWatchIds || {}).length;
+    const renamed = Object.keys(pendingImport.settings.clusterNames || {}).length;
+    importSummary.textContent =
+      `${pendingImport.fileName} · ${pendingImport.watches.length} 个监控项 · ${clusters} 个 Cluster / ${sites} 个站点` +
+      `${notified ? ` · ${notified} 项开启通知` : ""}${renamed ? ` · ${renamed} 个 Cluster 改名` : ""}`;
+  } else {
+    importSummary.textContent = "选择之前导出的 JSON 文件，导入后会立即按配置刷新。";
+  }
+}
+
+function updateExportSummary() {
+  const clusters = new Set(watches.map(clusterKey)).size;
+  exportCount.textContent = watches.length
+    ? `当前 ${watches.length} 个监控项 · ${clusters} 个 Cluster · 刷新间隔 ${refreshSecondsFromSettings(settings)} 秒`
+    : "暂无监控项";
+  exportButton.disabled = !watches.length;
+}
+
+function openConfigDialog() {
+  pendingImport = null;
+  importFile.value = "";
+  showConfigError("");
+  configMessage.textContent = "";
+  updateExportSummary();
+  updateImportSelection();
+  configDialog.showModal();
+}
+
+function exportConfig() {
+  if (!watches.length) {
+    showConfigError("没有可导出的监控项");
+    return;
+  }
+  const payload = buildConfigExport(watches, settings);
+  const blob = new Blob([`${JSON.stringify(payload, null, 2)}\n`], { type: "application/json" });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = configExportFilename();
+  document.body.append(link);
+  link.click();
+  link.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 5000);
+  configMessage.textContent = `已导出 ${payload.watches.length} 个监控项到 ${link.download}`;
+}
+
+async function readConfigFile(file) {
+  pendingImport = null;
+  showConfigError("");
+  if (!file) {
+    updateImportSelection();
+    return;
+  }
+  try {
+    pendingImport = { fileName: file.name, ...parseConfigImport(await file.text()) };
+  } catch (error) {
+    showConfigError(`${file.name}：${error.message}`);
+  }
+  updateImportSelection();
+}
+
+async function confirmConfigImport() {
+  if (!pendingImport) return;
+  const mode = importMode.querySelector("input:checked")?.value || "merge";
+  confirmImportButton.disabled = true;
+  try {
+    const origins = [...new Set(pendingImport.watches.map((watch) => permissionPattern(watch.baseUrl)))];
+    if (origins.length && !(await chrome.permissions.request({ origins }))) {
+      throw new Error("需要 Rancher 站点访问权限才能导入监控项");
+    }
+    const applied = applyConfigImport({ watches, settings }, pendingImport, mode);
+    await chrome.storage.local.set({
+      [WATCHES_KEY]: applied.watches,
+      [SETTINGS_KEY]: applied.settings
+    });
+    watches = applied.watches;
+    settings = applied.settings;
+    pendingImport = null;
+    importFile.value = "";
+    configDialog.close();
+    intervalSelect.value = String(refreshSecondsFromSettings(settings));
+    resetLiveRefreshTimer();
+    render();
+    summary.textContent = `已${mode === "replace" ? "替换为" : "导入"} ${applied.watches.length} 个监控项` +
+      `${origins.length ? `，并授权 ${origins.length} 个 Rancher 站点` : ""}，正在刷新状态`;
+  } catch (error) {
+    showConfigError(`导入失败：${error?.message || "无法写入扩展本地存储"}`);
+  } finally {
+    updateImportSelection();
+  }
+}
+
 function captureContentState() {
   const openDetails = [...content.querySelectorAll(".deployment-card details[open]")]
     .map((details) => details.closest(".deployment-card")?.dataset.id)
@@ -463,13 +763,15 @@ async function saveWatch(event) {
         : existingById.get(watchId(parsed))?.label || "",
       createdAt: existingById.get(watchId(parsed))?.createdAt || new Date().toISOString()
     }));
-    const newIds = new Set(newWatches.map(watchId));
-    watches = [...watches.filter((item) => !newIds.has(watchId(item))), ...newWatches];
+    const merged = mergeMonitors(watches, newWatches);
     saveButton.disabled = true;
     saveButton.textContent = `正在添加 ${newWatches.length} 项…`;
-    await chrome.storage.local.set({ [WATCHES_KEY]: watches });
+    await chrome.storage.local.set({ [WATCHES_KEY]: merged.watches });
+    watches = merged.watches;
     dialog.close();
     render();
+    summary.textContent = `已添加 ${merged.addedIds.length} 个监控项` +
+      `${merged.skippedIds.length ? `，${merged.skippedIds.length} 个已存在并已更新` : ""}，共 ${watches.length} 个`;
   } catch (error) {
     formError.textContent = error.message;
     formError.classList.remove("hidden");
@@ -479,7 +781,358 @@ async function saveWatch(event) {
   }
 }
 
+function showDiscoverError(message) {
+  discoverError.textContent = message;
+  discoverError.classList.toggle("hidden", !message);
+}
+
+async function sendDiscoverRequest(payload) {
+  const response = await chrome.runtime.sendMessage(payload);
+  if (response?.__rancherWatchError) throw new Error(response.__rancherWatchError);
+  return response || {};
+}
+
+function discoverClusterRef() {
+  const clusterId = discoverClusterSelect.value;
+  const baseUrl = discoverSiteSelect.value;
+  if (!clusterId || !baseUrl) return null;
+  const cluster = discoverClusters.find((item) => item.id === clusterId);
+  return { baseUrl, id: clusterId, name: cluster?.name || "" };
+}
+
+const DISCOVER_CLUSTER_ORIGIN_LABELS = { local: "本机已监控", tab: "当前标签页" };
+
+function discoverClusterLabel(cluster) {
+  const base = cluster.name && cluster.name !== cluster.id ? `${cluster.name}（${cluster.id}）` : cluster.id;
+  const marks = (cluster.origins || [])
+    .map((origin) => DISCOVER_CLUSTER_ORIGIN_LABELS[origin])
+    .filter(Boolean);
+  return marks.length ? `${base} · ${marks.join(" · ")}` : base;
+}
+
+function localClustersForSite(baseUrl) {
+  const clusters = new Map();
+  for (const watch of watches) {
+    if (watch.baseUrl !== baseUrl || !watch.clusterId || clusters.has(watch.clusterId)) continue;
+    clusters.set(watch.clusterId, { id: watch.clusterId, name: clusterDisplayName(watch, settings) });
+  }
+  return [...clusters.values()];
+}
+
+// Cluster 列表接口常常比命名空间与 Deployment 权限更严，本机配置和当前页面仍是有效来源。
+function clusterCandidatesFor(baseUrl, apiClusters = []) {
+  const fromTab = discoverTabCluster?.baseUrl === baseUrl ? [{ id: discoverTabCluster.clusterId }] : [];
+  return mergeClusterSources(
+    { clusters: apiClusters, origin: "api" },
+    { clusters: localClustersForSite(baseUrl), origin: "local" },
+    { clusters: fromTab, origin: "tab" }
+  );
+}
+
+function visibleDiscoverRows() {
+  return discoverRows.filter((row) =>
+    (discoverShowSystem || !isSystemNamespace(row.namespace)) &&
+    discoveryRowMatches(row, discoverQuery)
+  );
+}
+
+function updateDiscoverStatus() {
+  if (!discoverSiteSelect.value) {
+    discoverStatus.textContent = "暂无可浏览的站点，请在 Rancher 页面点“用当前标签页”。";
+    return;
+  }
+  if (!discoverClusterRef()) {
+    discoverStatus.textContent = discoverClusters.length
+      ? "选择一个 Cluster 后列出其中的 Deployment。"
+      : "没有可浏览的 Cluster，可在 Rancher 页面点“用当前标签页”，或改用粘贴地址添加。";
+    return;
+  }
+  if (discoverFailed) {
+    discoverStatus.textContent = "读取失败，未获得 Deployment 列表。";
+    return;
+  }
+  const hidden = discoverRows.filter((row) => isSystemNamespace(row.namespace)).length;
+  const parts = [`共 ${discoverRows.length} 个 Deployment`];
+  if (discoverClusterNotice) parts.push("Cluster 列表接口不可用，改用本机/标签页 Cluster");
+  if (discoverSource === "collection") parts.push("改用 Rancher 集合列表读取");
+  if (discoverSource === "namespace") {
+    parts.push(`改用按命名空间读取 ${discoverNamespacesRead} 个${discoverSkipped ? `，跳过 ${discoverSkipped} 个` : ""}`);
+    if (discoverTruncated) parts.push(`命名空间较多，只读取前 ${DISCOVERY_MAX_NAMESPACES} 个`);
+  } else if (discoverTruncated) {
+    parts.push(`列表较大，仅读取前 ${DISCOVERY_PAGE_SIZE * DISCOVERY_MAX_PAGES} 项`);
+  }
+  if (!discoverShowSystem && hidden) parts.push(`已隐藏 ${hidden} 个系统命名空间条目`);
+  if (discoverQuery) parts.push(`匹配 ${visibleDiscoverRows().length} 项`);
+  discoverStatus.textContent = parts.join(" · ");
+}
+
+function updateDiscoverSelectionCount() {
+  discoverSelectedCount.textContent = `已选 ${discoverSelection.size} 项`;
+  discoverAddButton.disabled = discoverSelection.size === 0;
+  discoverAddButton.textContent = discoverSelection.size
+    ? `添加到监控（${discoverSelection.size}）`
+    : "添加到监控";
+}
+
+function renderSiteSelect() {
+  discoverSiteSelect.innerHTML = discoverSites.length
+    ? discoverSites.map((site) => `<option value="${escapeHtml(site.baseUrl)}">${escapeHtml(site.baseUrl.replace(/^https?:\/\//, ""))}</option>`).join("")
+    : '<option value="">暂无已授权的 Rancher 站点</option>';
+}
+
+function renderClusterSelect() {
+  const previous = discoverClusterSelect.value;
+  discoverClusterSelect.innerHTML = discoverClusters.length
+    ? discoverClusters.map((cluster) => `<option value="${escapeHtml(cluster.id)}">${escapeHtml(discoverClusterLabel(cluster))}</option>`).join("")
+    : '<option value="">未读取到 Cluster</option>';
+  if (discoverClusters.some((cluster) => cluster.id === previous)) {
+    discoverClusterSelect.value = previous;
+  }
+}
+
+function renderDiscoverList() {
+  const cluster = discoverClusterRef();
+  if (!cluster) {
+    discoverList.innerHTML = '<div class="discover-empty">选择站点与 Cluster 后显示可添加的 Deployment。</div>';
+  } else if (discoverFailed) {
+    discoverList.innerHTML = '<div class="discover-empty">读取失败。可点“授权并重试”，或改用粘贴地址添加。</div>';
+  } else if (!discoverRows.length) {
+    discoverList.innerHTML = '<div class="discover-empty">该 Cluster 没有读取到 Deployment。</div>';
+  } else if (!visibleDiscoverRows().length) {
+    discoverList.innerHTML = '<div class="discover-empty">没有匹配的 Deployment，可勾选“系统命名空间”再试。</div>';
+  } else {
+    const watchedIds = new Set(watches.map(watchId));
+    discoverList.innerHTML = visibleDiscoverRows().map((row) => {
+      const watch = discoveredDeploymentToWatch(cluster, row);
+      const id = watchId(watch);
+      discoverWatchIndex.set(id, watch);
+      const watched = watchedIds.has(id);
+      return `<label class="discover-row${watched ? " is-watched" : ""}" data-id="${escapeHtml(id)}">
+        <input type="checkbox" aria-label="选择 ${escapeHtml(`${row.namespace}/${row.name}`)}"${watched ? " disabled" : ""}${discoverSelection.has(id) ? " checked" : ""} />
+        <span class="discover-ns">${escapeHtml(row.namespace)}</span>
+        <span class="discover-name">${escapeHtml(row.name)}</span>
+        <span class="discover-replicas">${row.ready}/${row.desired}</span>
+        <span class="discover-watched">${watched ? "已监控" : ""}</span>
+      </label>`;
+    }).join("");
+  }
+  updateDiscoverSelectionCount();
+}
+
+async function listDiscoverSites() {
+  const granted = await chrome.permissions.getAll();
+  const sites = new Map();
+  for (const pattern of granted?.origins || []) {
+    const baseUrl = pattern.replace(/\/\*$/, "");
+    if (/^https?:\/\/[^/]+$/.test(baseUrl)) sites.set(baseUrl, { baseUrl });
+  }
+  for (const watch of watches) {
+    if (!sites.has(watch.baseUrl)) sites.set(watch.baseUrl, { baseUrl: watch.baseUrl });
+  }
+  return [...sites.values()].sort((left, right) => left.baseUrl.localeCompare(right.baseUrl));
+}
+
+async function openDiscoverDialog() {
+  discoverBuild.textContent = `v${chrome.runtime.getManifest().version}`;
+  discoverSelection.clear();
+  discoverWatchIndex.clear();
+  discoverClusters = [];
+  discoverClusterNotice = "";
+  discoverTabCluster = null;
+  discoverRows = [];
+  discoverTruncated = false;
+  discoverSource = "";
+  discoverFailed = false;
+  discoverQuery = "";
+  discoverShowSystem = false;
+  discoverSearchInput.value = "";
+  discoverSystemInput.checked = false;
+  showDiscoverError("");
+  discoverSites = await listDiscoverSites();
+  renderSiteSelect();
+  renderClusterSelect();
+  renderDiscoverList();
+  updateDiscoverStatus();
+  discoverDialog.showModal();
+  if (discoverSites.length) await loadDiscoverClusters();
+}
+
+async function loadDiscoverClusters() {
+  const baseUrl = discoverSiteSelect.value;
+  if (!baseUrl) return;
+  discoverTabCluster = clusterFromUrl(await currentTabUrl());
+  discoverClusterNotice = "";
+  discoverClusters = clusterCandidatesFor(baseUrl);
+  discoverRows = [];
+  discoverSource = "";
+  discoverFailed = false;
+  renderClusterSelect();
+  renderDiscoverList();
+  showDiscoverError("");
+  discoverStatus.textContent = "正在读取 Cluster 列表…";
+  try {
+    const response = await sendDiscoverRequest({ type: "discover-clusters", baseUrl });
+    discoverClusters = clusterCandidatesFor(baseUrl, response.clusters || []);
+    if (!discoverClusters.some((cluster) => cluster.origins?.includes("api"))) {
+      discoverClusterNotice = "该站点没有返回 Cluster 列表，可能是当前账号无权限；已改用本机与当前标签页的 Cluster。";
+    }
+  } catch (error) {
+    discoverClusters = clusterCandidatesFor(baseUrl);
+    if (discoverClusters.length) {
+      discoverClusterNotice = `${error.message}（本机与当前标签页的 Cluster 仍可选）`;
+    } else {
+      discoverClusterNotice = error.message;
+    }
+  }
+  renderClusterSelect();
+  if (discoverClusters.length) await loadDiscoverDeployments();
+  else updateDiscoverStatus();
+}
+
+function knownNamespaceNames(cluster) {
+  return [...new Set(
+    watches
+      .filter((watch) => watch.baseUrl === cluster.baseUrl && watch.clusterId === cluster.id)
+      .map((watch) => watch.namespace)
+  )];
+}
+
+async function loadDiscoverDeployments() {
+  const cluster = discoverClusterRef();
+  if (!cluster) return;
+  discoverRows = [];
+  discoverTruncated = false;
+  discoverSource = "";
+  discoverSkipped = 0;
+  discoverNamespacesRead = 0;
+  discoverFailed = false;
+  renderDiscoverList();
+  showDiscoverError(discoverClusterNotice);
+  discoverStatus.textContent = `正在读取 ${cluster.name || cluster.id} 的 Deployment 列表…`;
+  try {
+    const response = await sendDiscoverRequest({
+      type: "discover-deployments",
+      baseUrl: cluster.baseUrl,
+      clusterId: cluster.id,
+      namespaces: knownNamespaceNames(cluster)
+    });
+    discoverRows = response.deployments || [];
+    discoverTruncated = response.truncated === true;
+    discoverSource = response.source || "cluster";
+    discoverSkipped = Number(response.skipped) || 0;
+    discoverNamespacesRead = Number(response.namespacesRead) || 0;
+  } catch (error) {
+    discoverFailed = true;
+    showDiscoverError(error.message);
+  } finally {
+    renderDiscoverList();
+    updateDiscoverStatus();
+  }
+}
+
+async function useCurrentTabForDiscovery() {
+  const found = clusterFromUrl(await currentTabUrl());
+  if (!found) {
+    showDiscoverError("当前标签页不是 Rancher Cluster 页面，请手动选择站点。");
+    return;
+  }
+  discoverTabCluster = found;
+  discoverTabCluster = found;
+  if (!discoverSites.some((site) => site.baseUrl === found.baseUrl)) {
+    discoverSites = [...discoverSites, { baseUrl: found.baseUrl }]
+      .sort((left, right) => left.baseUrl.localeCompare(right.baseUrl));
+    renderSiteSelect();
+  }
+  discoverSiteSelect.value = found.baseUrl;
+  await loadDiscoverClusters();
+  if (discoverClusters.some((cluster) => cluster.id === found.clusterId)) {
+    discoverClusterSelect.value = found.clusterId;
+    await loadDiscoverDeployments();
+  }
+}
+
+async function grantDiscoverSite() {
+  const baseUrl = discoverSiteSelect.value;
+  if (!baseUrl) {
+    showDiscoverError("请先选择要授权的 Rancher 站点。");
+    return;
+  }
+  discoverGrantButton.disabled = true;
+  try {
+    const granted = await chrome.permissions.request({ origins: [permissionPattern(baseUrl)] });
+    if (!granted) {
+      showDiscoverError("未获得该站点的访问权限，无法读取列表。");
+      discoverStatus.textContent = "未获得该站点的访问权限。";
+      return;
+    }
+    await loadDiscoverClusters();
+  } finally {
+    discoverGrantButton.disabled = false;
+  }
+}
+
+function toggleDiscoverRow(event) {
+  const row = event.target.closest(".discover-row");
+  if (!row || event.target.tagName !== "INPUT") return;
+  const id = row.dataset.id;
+  if (event.target.checked) {
+    const watch = discoverWatchIndex.get(id);
+    if (watch) discoverSelection.set(id, watch);
+  } else {
+    discoverSelection.delete(id);
+  }
+  updateDiscoverSelectionCount();
+}
+
+function selectShownDiscoverRows() {
+  const cluster = discoverClusterRef();
+  if (!cluster) return;
+  const watchedIds = new Set(watches.map(watchId));
+  for (const row of visibleDiscoverRows()) {
+    const watch = discoveredDeploymentToWatch(cluster, row);
+    const id = watchId(watch);
+    if (watchedIds.has(id)) continue;
+    discoverWatchIndex.set(id, watch);
+    discoverSelection.set(id, watch);
+  }
+  renderDiscoverList();
+}
+
+function clearDiscoverSelection() {
+  discoverSelection.clear();
+  renderDiscoverList();
+}
+
+async function addDiscoveredWatches() {
+  const pending = [...discoverSelection.values()];
+  if (!pending.length) return;
+  discoverAddButton.disabled = true;
+  discoverAddButton.textContent = "正在添加…";
+  try {
+    const origins = [...new Set(pending.map((watch) => permissionPattern(watch.baseUrl)))];
+    const granted = await chrome.permissions.request({ origins });
+    if (!granted) throw new Error("需要 Rancher 站点访问权限才能读取状态");
+    const merged = mergeMonitors(watches, pending);
+    await chrome.storage.local.set({ [WATCHES_KEY]: merged.watches });
+    watches = merged.watches;
+    discoverSelection.clear();
+    discoverDialog.close();
+    dialog.close();
+    render();
+    summary.textContent = `已添加 ${merged.addedIds.length} 个监控项` +
+      `${merged.skippedIds.length ? `，${merged.skippedIds.length} 个已存在并已更新` : ""}，正在刷新状态`;
+  } catch (error) {
+    showDiscoverError(`添加失败：${error?.message || "无法写入扩展本地存储"}`);
+  } finally {
+    updateDiscoverSelectionCount();
+  }
+}
+
 async function refreshAll(watchIds = null) {
+  if (paused()) {
+    summary.textContent = "监控已暂停，不会发起 Rancher 请求";
+    return results;
+  }
   if (refreshInProgress) {
     if (Array.isArray(watchIds)) watchIds.forEach((id) => pendingWatchIds.add(id));
     else pendingFullRefresh = true;
@@ -519,16 +1172,18 @@ async function refreshAll(watchIds = null) {
 
 function resetLiveRefreshTimer() {
   if (liveRefreshTimer) clearInterval(liveRefreshTimer);
+  if (paused()) return;
   liveRefreshTimer = setInterval(() => {
     if (watches.length) refreshAll();
   }, refreshSecondsFromSettings(settings) * 1000);
 }
 
 async function init() {
-  const data = await chrome.storage.local.get([WATCHES_KEY, RESULTS_KEY, SETTINGS_KEY]);
+  const data = await chrome.storage.local.get([WATCHES_KEY, RESULTS_KEY, SETTINGS_KEY, HISTORY_KEY]);
   watches = data[WATCHES_KEY] || [];
   results = data[RESULTS_KEY] || {};
   settings = data[SETTINGS_KEY] || {};
+  history = Array.isArray(data[HISTORY_KEY]) ? data[HISTORY_KEY] : [];
   intervalSelect.value = String(refreshSecondsFromSettings(settings));
   resetLiveRefreshTimer();
   render();
@@ -537,6 +1192,55 @@ async function init() {
 
 addButton.addEventListener("click", openAddDialog);
 refreshButton.addEventListener("click", () => refreshAll());
+async function toggleRememberLogin() {
+  const enabling = settings.rememberLogin !== true;
+  try {
+    if (enabling) {
+      const granted = await chrome.permissions.request({ permissions: ["cookies"] });
+      if (!granted) throw new Error("需要 Cookie 权限才能在浏览器重启后保持 Rancher 登录");
+    }
+    const nextSettings = { ...settings, rememberLogin: enabling };
+    await chrome.storage.local.set({ [SETTINGS_KEY]: nextSettings });
+    settings = nextSettings;
+    updateRememberLoginButton();
+    if (enabling) {
+      const response = await chrome.runtime.sendMessage({ type: "remember-login-now" });
+      if (response?.__rancherWatchError || response?.ok === false) {
+        throw new Error(response?.__rancherWatchError || "无法读取当前 Rancher 会话");
+      }
+      summary.textContent = response?.persisted
+        ? `已保持 ${response.persisted} 个 Rancher 站点的当前登录（约 30 天）`
+        : "已开启保持登录；下次登录 Rancher 时会自动记住最新会话";
+    } else {
+      await chrome.permissions.remove({ permissions: ["cookies"] });
+      summary.textContent = "已关闭保持登录；可在 Rancher 中退出已有会话";
+    }
+  } catch (error) {
+    summary.textContent = `保持登录设置失败：${error?.message || "未知错误"}`;
+  }
+}
+rememberLoginButton.addEventListener("click", toggleRememberLogin);
+async function togglePause() {
+  const nextSettings = settingsWithMonitoringPaused(settings, !paused());
+  try {
+    await chrome.storage.local.set({ [SETTINGS_KEY]: nextSettings });
+    settings = nextSettings;
+    updatePauseButton();
+    resetLiveRefreshTimer();
+    if (paused()) {
+      summary.textContent = "监控已暂停 · 保留上次状态";
+      render();
+    } else {
+      summary.textContent = "已恢复监控";
+      render();
+      if (watches.length) refreshAll();
+    }
+  } catch (error) {
+    summary.textContent = `暂停设置保存失败：${error?.message || "无法写入本地存储"}`;
+  }
+}
+pauseButton.addEventListener("click", togglePause);
+resumeFromBannerButton.addEventListener("click", togglePause);
 document.querySelector("#use-current").addEventListener("click", () => useCurrentTab(true));
 urlInput.addEventListener("input", updateUrlHint);
 document.querySelector("#close-dialog").addEventListener("click", () => dialog.close());
@@ -546,6 +1250,40 @@ nameForm.addEventListener("submit", saveDisplayName);
 resetDisplayNameButton.addEventListener("click", resetDisplayName);
 document.querySelector("#close-name-dialog").addEventListener("click", () => nameDialog.close());
 document.querySelector("#cancel-name-dialog").addEventListener("click", () => nameDialog.close());
+configButton.addEventListener("click", openConfigDialog);
+document.querySelector("#close-config-dialog").addEventListener("click", () => configDialog.close());
+document.querySelector("#cancel-config-dialog").addEventListener("click", () => configDialog.close());
+exportButton.addEventListener("click", exportConfig);
+pickFileButton.addEventListener("click", () => importFile.click());
+importFile.addEventListener("change", () => readConfigFile(importFile.files[0]));
+importMode.addEventListener("change", () => showConfigError(""));
+configForm.addEventListener("submit", (event) => {
+  event.preventDefault();
+  if (pendingImport) confirmConfigImport();
+});
+confirmImportButton.addEventListener("click", confirmConfigImport);
+browseButton.addEventListener("click", openDiscoverDialog);
+document.querySelector("#close-discover-dialog").addEventListener("click", () => discoverDialog.close());
+document.querySelector("#cancel-discover-dialog").addEventListener("click", () => discoverDialog.close());
+discoverForm.addEventListener("submit", (event) => event.preventDefault());
+discoverSiteSelect.addEventListener("change", () => loadDiscoverClusters());
+discoverClusterSelect.addEventListener("change", () => loadDiscoverDeployments());
+discoverUseTabButton.addEventListener("click", useCurrentTabForDiscovery);
+discoverGrantButton.addEventListener("click", grantDiscoverSite);
+discoverSearchInput.addEventListener("input", () => {
+  discoverQuery = discoverSearchInput.value;
+  renderDiscoverList();
+  updateDiscoverStatus();
+});
+discoverSystemInput.addEventListener("change", () => {
+  discoverShowSystem = discoverSystemInput.checked;
+  renderDiscoverList();
+  updateDiscoverStatus();
+});
+discoverList.addEventListener("change", toggleDiscoverRow);
+discoverSelectShownButton.addEventListener("click", selectShownDiscoverRows);
+discoverClearButton.addEventListener("click", clearDiscoverSelection);
+discoverAddButton.addEventListener("click", addDiscoveredWatches);
 document.querySelectorAll(".filter[data-filter]").forEach((button) => {
   button.addEventListener("click", () => {
     filter = button.dataset.filter;
@@ -600,6 +1338,11 @@ chrome.storage.onChanged.addListener((changes, area) => {
   }
   if (changes[WATCHES_KEY]) {
     watches = changes[WATCHES_KEY].newValue || [];
+    render();
+  }
+  if (changes[HISTORY_KEY]) {
+    const nextHistory = changes[HISTORY_KEY].newValue;
+    history = Array.isArray(nextHistory) ? nextHistory : [];
     render();
   }
 });

@@ -10,7 +10,7 @@
 
 ### 简短说明
 
-集中监控多个 Rancher Cluster 中指定 Deployment 与 Pod 的状态，支持异常筛选、紧凑全局视图和定时刷新。
+集中监控多个 Rancher Cluster 中指定 Deployment 与 Pod 的状态，支持按就绪时间排序、历史时间线、异常筛选、紧凑全局视图和定时刷新。
 
 ### 详细说明
 
@@ -19,15 +19,26 @@ Rancher Deployment Watch 用于集中查看多个 Rancher Cluster 中指定 Depl
 主要功能：
 
 - 批量添加多个 Rancher、Cluster、Namespace 和 Deployment；
+- 支持发现服务：直接浏览 Cluster 与 Deployment 列表并搜索、勾选，批量加入监控，无需逐个打开详情页；
 - 展示期望、就绪、可用副本，以及 Pod、镜像、节点、IP 和重启次数；
 - 自动识别正常、有风险、不可用、暂停和未知状态；
+- 按最近一次就绪时间排序，最后就绪的 Deployment 排在前面，并显示“就绪 X 分钟前”；
+- 提供按就绪时间倒序排列的历史时间线，记录每次就绪与状态切换；
 - 支持异常筛选、五列全局视图和 5 秒起步的弹窗刷新；
 - 支持开启异常浏览器通知，在后台发现新的异常时弹出桌面提醒；
 - 支持修改 Cluster 与 Deployment 的本地显示名称；
+- 支持将监控配置导出为 JSON 文件，在其他浏览器导入时可选择合并或替换；
 - 单个 Cluster 请求异常或超时不会阻塞其他监控结果；
 - 所有配置与最近状态仅保存在本机扩展存储中。
 
-使用前请先在 Chrome 中登录目标 Rancher。添加监控时，扩展会按站点请求访问权限，并仅调用 Rancher Kubernetes 代理 API 读取用户指定的工作负载状态。
+使用前请先在 Chrome 中登录目标 Rancher。添加监控、导入配置或使用发现服务时，扩展会按站点请求访问权限，并仅调用 Rancher Kubernetes 代理 API 读取工作负载列表与状态。
+
+## 新版本更新说明（0.5.0）
+
+- 新增“时间线”视图：按就绪时间倒序记录每个 Deployment 的就绪与状态切换；
+- Deployment 卡片改为按最近一次就绪时间排序，最后就绪的排在前面，并显示“就绪 X 分钟前”；
+- 搜索与“仅异常”筛选同样适用于时间线；
+- 配置文件导出与导入支持保存时间线视图。
 
 ## 隐私权规范
 
@@ -43,7 +54,7 @@ Rancher Deployment Watch 用于集中查看多个 Rancher Cluster 中指定 Depl
 
 ### activeTab 权限理由
 
-仅在用户点击扩展并选择“使用当前标签页”时读取当前活动标签页的 URL，用于解析 Rancher Deployment 地址并快速添加监控。不会持续读取浏览历史或页面内容。
+仅在用户点击扩展并选择“使用当前标签页”时读取当前活动标签页的 URL，用于解析 Rancher Deployment 地址，或为发现服务带入当前站点与 Cluster，以快速添加监控。不会持续读取浏览历史或页面内容。
 
 ### alarms 权限理由
 
@@ -57,6 +68,10 @@ Rancher Deployment Watch 用于集中查看多个 Rancher Cluster 中指定 Depl
 
 用于在本机保存用户添加的 Rancher、Cluster、Deployment 监控配置、显示名称、刷新间隔、视图模式及最近一次状态结果。数据不会上传到开发者服务器或出售给第三方。
 
+### cookies 可选权限理由
+
+仅在用户主动开启“保持登录”时读取已添加且已授权 Rancher 站点的 `R_SESS` 会话 Cookie，并为会话 Cookie 设置约 30 天的过期时间，以避免关闭浏览器后立即丢失登录。Cookie 值不会写入扩展存储或发送给开发者、第三方；Rancher 服务端过期、管理员撤销或用户主动退出仍会结束登录。
+
 ### 可选站点权限理由
 
 仅在用户添加某个 Rancher 地址并明确授权后，访问该 Rancher 站点的 Kubernetes 代理 API，以读取指定 Deployment、ReplicaSet 和 Pod 的运行状态。权限按站点动态申请，不会访问未授权站点。
@@ -64,7 +79,7 @@ Rancher Deployment Watch 用于集中查看多个 Rancher Cluster 中指定 Depl
 ### 数据使用披露
 
 - 勾选“网站内容”：扩展会读取用户明确指定的 Rancher 工作负载状态；
-- 不勾选身份验证信息：扩展会复用浏览器已有登录会话，但不会读取或保存用户名、密码、Cookie 值或 API Token；
+- 勾选“身份验证信息”：用户开启“保持登录”时，扩展会在本机处理已授权 Rancher 站点的 `R_SESS` Cookie，仅用于延长浏览器会话，不会上传或写入扩展存储；
 - 数据只在用户设备和用户授权的 Rancher 站点之间传输，不发送到开发者服务器；
 - 勾选所有“有限使用”与开发者计划政策确认项；
 - 隐私政策正文见项目根目录 `PRIVACY.md`。提交前需将其发布到公开可访问的 HTTPS 地址，并把该地址填入后台。
