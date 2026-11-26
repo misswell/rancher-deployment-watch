@@ -9,8 +9,9 @@ import {
   watchId,
   watchMatchesQuery,
   compareWatchesByLastReady,
-  sortedTimelineByNormalTime,
+  sortTimelineEvents,
   timelineEnvironmentOptions,
+  timelineEventsWithTimes,
   clusterKey,
   clusterDisplayName,
   settingsWithClusterName,
@@ -51,8 +52,9 @@ const labelInput = document.querySelector("#watch-label");
 const formError = document.querySelector("#form-error");
 const intervalSelect = document.querySelector("#refresh-interval");
 const searchInput = document.querySelector("#watch-search");
-const timelineEnvFilter = document.querySelector("#timeline-env-filter");
+const timelineFilters = document.querySelector("#timeline-filters");
 const timelineEnvSelect = document.querySelector("#timeline-environment");
+const timelineSortSelect = document.querySelector("#timeline-sort");
 const urlHint = document.querySelector("#url-hint");
 const nameDialog = document.querySelector("#name-dialog");
 const nameForm = document.querySelector("#name-form");
@@ -101,6 +103,7 @@ let filter = "all";
 let searchQuery = "";
 let timelineEnvironment = "";
 let timelineEnvironmentSignature = "";
+let timelineSort = "normal";
 let editingNameTarget = null;
 let pendingImport = null;
 let discoverSites = [];
@@ -293,8 +296,10 @@ function timelineNormalTimes() {
   return normalTimes;
 }
 
-function syncTimelineEnvironmentFilter(environments, visible) {
-  timelineEnvFilter.classList.toggle("hidden", !visible);
+const TIMELINE_SORT_MODES = new Set(["normal", "abnormal", "separate", "merged"]);
+
+function syncTimelineFilters(environments, visible) {
+  timelineFilters.classList.toggle("hidden", !visible);
   if (!visible) return;
   if (timelineEnvironment && !environments.some((environment) => environment.key === timelineEnvironment)) {
     timelineEnvironment = "";
@@ -310,6 +315,42 @@ function syncTimelineEnvironmentFilter(environments, visible) {
     ].join("");
   }
   timelineEnvSelect.value = timelineEnvironment;
+  timelineSortSelect.value = timelineSort;
+}
+
+function timelineItemHtml(event, watch) {
+  const note = timelineNote(event);
+  const normalTime = event.normalAt
+    ? `<time class="timeline-time-value" datetime="${escapeHtml(event.normalAt)}">${escapeHtml(timelineTime(event.normalAt))}</time>`
+    : '<span class="timeline-time-value empty" title="暂无更早的正常记录">—</span>';
+  const abnormalTime = event.abnormalAt
+    ? `<time class="timeline-time-value" datetime="${escapeHtml(event.abnormalAt)}">${escapeHtml(timelineTime(event.abnormalAt))}</time>`
+    : '<span class="timeline-time-value empty" title="这条记录不是异常状态">—</span>';
+  return `
+    <li class="timeline-item status-${escapeHtml(event.status)}" data-id="${escapeHtml(event.id)}">
+      <span class="timeline-dot" aria-hidden="true"></span>
+      <div class="timeline-card">
+        <div class="timeline-times">
+          <div class="timeline-time-block normal">
+            <span class="timeline-time-label">正常时间</span>
+            ${normalTime}
+          </div>
+          <div class="timeline-time-block abnormal">
+            <span class="timeline-time-label">异常时间</span>
+            ${abnormalTime}
+          </div>
+        </div>
+        <div class="timeline-line">
+          <div class="timeline-title">
+            <strong>${escapeHtml(deploymentDisplayName(watch))}</strong>
+            <span class="timeline-place">${escapeHtml(clusterDisplayName(watch, settings))} · ${escapeHtml(watch.namespace)}/${escapeHtml(watch.deployment)}</span>
+            ${note ? `<span class="timeline-note" title="${escapeHtml(note)}">${escapeHtml(note)}</span>` : ""}
+          </div>
+          <span class="status ${escapeHtml(event.status)}">${statusText[event.status] || "未知"}</span>
+          <button class="link-button timeline-open" data-id="${escapeHtml(event.id)}">打开 Rancher</button>
+        </div>
+      </div>
+    </li>`;
 }
 
 function renderTimeline(environments = []) {
@@ -319,7 +360,7 @@ function renderTimeline(environments = []) {
       .filter((watch) => watchMatchesQuery(watch, searchQuery, settings))
       .map(watchId)
   );
-  let events = sortedTimelineByNormalTime(history, timelineNormalTimes())
+  let events = timelineEventsWithTimes(history, timelineNormalTimes())
     .filter((event) => active.has(event.id) && allowed.has(event.id));
   if (timelineEnvironment) {
     events = events.filter((event) => clusterKey(active.get(event.id)) === timelineEnvironment);
@@ -327,7 +368,6 @@ function renderTimeline(environments = []) {
   if (filter === "problem") {
     events = events.filter((event) => ["degraded", "unavailable", "unknown"].includes(event.status));
   }
-  events = events.slice(0, 200);
   if (!events.length) {
     const selectedEnvironment = environments.find((environment) => environment.key === timelineEnvironment);
     const empty = filter === "problem"
@@ -351,48 +391,50 @@ function renderTimeline(environments = []) {
       </div>`;
     return;
   }
-  const items = events.map((event) => {
-    const watch = active.get(event.id);
-    const note = timelineNote(event);
-    const normalTime = event.normalAt
-      ? `<time class="timeline-time-value" datetime="${escapeHtml(event.normalAt)}">${escapeHtml(timelineTime(event.normalAt))}</time>`
-      : '<span class="timeline-time-value empty" title="暂无更早的正常记录">—</span>';
-    const abnormalTime = event.abnormalAt
-      ? `<time class="timeline-time-value" datetime="${escapeHtml(event.abnormalAt)}">${escapeHtml(timelineTime(event.abnormalAt))}</time>`
-      : '<span class="timeline-time-value empty" title="这条记录不是异常状态">—</span>';
-    return `
-      <li class="timeline-item status-${escapeHtml(event.status)}" data-id="${escapeHtml(event.id)}">
-        <span class="timeline-dot" aria-hidden="true"></span>
-        <div class="timeline-card">
-          <div class="timeline-times">
-            <div class="timeline-time-block normal">
-              <span class="timeline-time-label">正常时间</span>
-              ${normalTime}
-            </div>
-            <div class="timeline-time-block abnormal">
-              <span class="timeline-time-label">异常时间</span>
-              ${abnormalTime}
-            </div>
-          </div>
-          <div class="timeline-line">
-            <div class="timeline-title">
-              <strong>${escapeHtml(deploymentDisplayName(watch))}</strong>
-              <span class="timeline-place">${escapeHtml(clusterDisplayName(watch, settings))} · ${escapeHtml(watch.namespace)}/${escapeHtml(watch.deployment)}</span>
-              ${note ? `<span class="timeline-note" title="${escapeHtml(note)}">${escapeHtml(note)}</span>` : ""}
-            </div>
-            <span class="status ${escapeHtml(event.status)}">${statusText[event.status] || "未知"}</span>
-            <button class="link-button timeline-open" data-id="${escapeHtml(event.id)}">打开 Rancher</button>
-          </div>
-        </div>
-      </li>`;
-  }).join("");
+
+  const sortMode = TIMELINE_SORT_MODES.has(timelineSort) ? timelineSort : "normal";
+  const sections = sortMode === "separate"
+    ? [
+        {
+          key: "normal",
+          title: "正常记录",
+          hint: "按正常时间",
+          events: sortTimelineEvents(events.filter((event) => !event.abnormalAt), "normal").slice(0, 200)
+        },
+        {
+          key: "abnormal",
+          title: "异常记录",
+          hint: "按异常时间",
+          events: sortTimelineEvents(events.filter((event) => event.abnormalAt), "abnormal").slice(0, 200)
+        }
+      ].filter((section) => section.events.length)
+    : [{
+        key: "",
+        title: "",
+        hint: "",
+        events: sortTimelineEvents(events, sortMode).slice(0, 200)
+      }];
+  const total = sections.reduce((sum, section) => sum + section.events.length, 0);
+  const sortText = sortMode === "separate"
+    ? "正常 / 异常分开排序"
+    : sortMode === "merged"
+      ? "正常 / 异常合并排序"
+      : sortMode === "abnormal" ? "按异常时间排序" : "按正常时间排序";
+  const sectionsHtml = sections.map((section) => `
+    ${section.title ? `
+      <h3 class="timeline-group-title ${section.key}">
+        <span>${section.title}</span>
+        <small>${section.hint} · ${section.events.length} 条</small>
+      </h3>` : ""}
+    <ol class="timeline-list">${section.events.map((event) => timelineItemHtml(event, active.get(event.id))).join("")}</ol>
+  `).join("");
   content.innerHTML = `
     <section class="timeline">
       <div class="timeline-header">
         <h2>历史时间线</h2>
-        <span>最近 ${events.length} 条 · 按正常时间排序 · 左正常 / 右异常</span>
+        <span>${total} 条 · ${sortText} · 左正常 / 右异常</span>
       </div>
-      <ol class="timeline-list">${items}</ol>
+      ${sectionsHtml}
     </section>`;
   content.querySelectorAll(".timeline-open").forEach((button) => {
     button.addEventListener("click", () => {
@@ -408,7 +450,7 @@ function render() {
     ? "compact"
     : settings.viewMode === "timeline" ? "timeline" : "standard";
   const environments = timelineEnvironmentOptions(watches, settings);
-  syncTimelineEnvironmentFilter(environments, viewMode === "timeline");
+  syncTimelineFilters(environments, viewMode === "timeline");
   content.classList.toggle("compact-mode", viewMode === "compact");
   content.classList.toggle("timeline-mode", viewMode === "timeline");
   document.querySelectorAll(".view-mode").forEach((button) => {
@@ -1390,6 +1432,10 @@ searchInput.addEventListener("input", () => {
 });
 timelineEnvSelect.addEventListener("change", () => {
   timelineEnvironment = timelineEnvSelect.value;
+  render();
+});
+timelineSortSelect.addEventListener("change", () => {
+  timelineSort = TIMELINE_SORT_MODES.has(timelineSortSelect.value) ? timelineSortSelect.value : "normal";
   render();
 });
 chrome.storage.onChanged.addListener((changes, area) => {

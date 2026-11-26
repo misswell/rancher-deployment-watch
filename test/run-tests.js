@@ -15,6 +15,8 @@ import {
   mergeHistory,
   sortedTimeline,
   sortedTimelineByNormalTime,
+  sortedTimelineByAbnormalTime,
+  sortTimelineEvents,
   timelineEventsWithTimes,
   timelineEnvironmentOptions,
   clusterKey,
@@ -361,6 +363,53 @@ test("sorts the timeline by normal time and groups anomalies into their normal e
   assert.deepStrictEqual(
     ordered.map((event) => `${event.id}:${event.status}`),
     ["b:unknown", "b:healthy", "a:degraded", "a:healthy"]
+  );
+});
+
+test("sorts the timeline by abnormal time and leaves normal records after anomalies", () => {
+  const events = [
+    { id: "a", at: "2026-10-01T00:00:00.000Z", status: "healthy" },
+    { id: "a", at: "2026-10-05T00:00:00.000Z", status: "degraded" },
+    { id: "b", at: "2026-10-04T00:00:00.000Z", status: "healthy" },
+    { id: "b", at: "2026-10-06T00:00:00.000Z", status: "unknown" }
+  ];
+  const ordered = sortedTimelineByAbnormalTime(events);
+  assert.deepStrictEqual(
+    ordered.map((event) => `${event.id}:${event.status}`),
+    ["b:unknown", "a:degraded", "b:healthy", "a:healthy"]
+  );
+});
+
+test("separates normal and abnormal records for independent sorting", () => {
+  const events = [
+    { id: "a", at: "2026-10-01T00:00:00.000Z", status: "healthy" },
+    { id: "a", at: "2026-10-05T00:00:00.000Z", status: "degraded" },
+    { id: "b", at: "2026-10-04T00:00:00.000Z", status: "healthy" },
+    { id: "b", at: "2026-10-06T00:00:00.000Z", status: "unknown" }
+  ];
+  const entries = timelineEventsWithTimes(events);
+  const normal = sortTimelineEvents(entries.filter((event) => !event.abnormalAt), "normal");
+  const abnormal = sortTimelineEvents(entries.filter((event) => event.abnormalAt), "abnormal");
+  assert.deepStrictEqual(
+    normal.map((event) => `${event.id}:${event.status}`),
+    ["b:healthy", "a:healthy"]
+  );
+  assert.deepStrictEqual(
+    abnormal.map((event) => `${event.id}:${event.status}`),
+    ["b:unknown", "a:degraded"]
+  );
+});
+
+test("merges normal and abnormal records using each record's own time", () => {
+  const events = [
+    { id: "a", at: "2026-10-01T00:00:00.000Z", status: "healthy" },
+    { id: "a", at: "2026-10-05T00:00:00.000Z", status: "degraded" },
+    { id: "b", at: "2026-10-10T00:00:00.000Z", status: "healthy" }
+  ];
+  const merged = sortTimelineEvents(timelineEventsWithTimes(events), "merged");
+  assert.deepStrictEqual(
+    merged.map((event) => `${event.id}:${event.status}`),
+    ["b:healthy", "a:degraded", "a:healthy"]
   );
 });
 
