@@ -58,6 +58,11 @@
           <button class="filter view-mode" data-view="compact" aria-pressed="false">全局</button>
           <button class="filter view-mode" data-view="timeline" aria-pressed="false">时间线</button>
         </div>
+        <label class="timeline-env-filter hidden" id="timeline-env-filter" title="按环境筛选历史时间线">
+          <select id="timeline-environment" aria-label="按环境筛选历史时间线">
+            <option value="">全部环境</option>
+          </select>
+        </label>
       </div>
       <div class="toolbar-right">
         <label class="interval-label" title="弹窗打开时按所选间隔触发；上次刷新未完成时合并为下一次，Chrome 后台最短约 30 秒">

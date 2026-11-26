@@ -14,6 +14,9 @@ import {
   historyEventFor,
   mergeHistory,
   sortedTimeline,
+  sortedTimelineByNormalTime,
+  timelineEventsWithTimes,
+  timelineEnvironmentOptions,
   clusterKey,
   watchId,
   permissionPattern,
@@ -295,12 +298,20 @@ test("turns status changes into timeline events", () => {
   assert.equal(first.status, "healthy");
   assert.equal(first.ready, 2);
   assert.equal(first.at, "2026-10-01T00:00:00.000Z");
+  assert.equal(first.normalAt, "2026-10-01T00:00:00.000Z");
+  assert.equal(first.abnormalAt, null);
   // 状态未变：不追加事件。
   assert.equal(historyEventFor(watch, { ok: true, status: "healthy", checkedAt: "2026-10-02T00:00:00.000Z" }, { status: "healthy" }), null);
   // 状态变化：记录新事件；失败归一化为 unknown。
-  const broken = historyEventFor(watch, { ok: false, error: "超时", checkedAt: "2026-10-03T00:00:00.000Z" }, { status: "healthy" });
+  const broken = historyEventFor(
+    watch,
+    { ok: false, error: "超时", checkedAt: "2026-10-03T00:00:00.000Z" },
+    { status: "healthy", lastReadyAt: "2026-10-01T00:00:00.000Z" }
+  );
   assert.equal(broken.status, "unknown");
   assert.equal(broken.error, "超时");
+  assert.equal(broken.normalAt, "2026-10-01T00:00:00.000Z");
+  assert.equal(broken.abnormalAt, "2026-10-03T00:00:00.000Z");
 });
 
 test("caps history and sorts the timeline by ready time descending", () => {
@@ -313,6 +324,84 @@ test("caps history and sorts the timeline by ready time descending", () => {
   assert.equal(capped.length, 2);
   assert.deepStrictEqual(capped.map((event) => event.id), ["b", "c"]);
   assert.deepStrictEqual(sortedTimeline(events).map((event) => event.id), ["b", "c", "a"]);
+});
+
+test("fills normal and abnormal times for new and legacy timeline events", () => {
+  const events = [
+    { id: "a", at: "2026-10-01T00:00:00.000Z", status: "healthy" },
+    { id: "a", at: "2026-10-02T00:00:00.000Z", status: "degraded" },
+    { id: "a", at: "2026-10-03T00:00:00.000Z", status: "healthy" },
+    { id: "b", at: "2026-10-04T00:00:00.000Z", status: "unknown" }
+  ];
+  const entries = timelineEventsWithTimes(events);
+  assert.equal(entries[0].normalAt, "2026-10-01T00:00:00.000Z");
+  assert.equal(entries[0].abnormalAt, null);
+  assert.equal(entries[1].normalAt, "2026-10-01T00:00:00.000Z");
+  assert.equal(entries[1].abnormalAt, "2026-10-02T00:00:00.000Z");
+  assert.equal(entries[2].normalAt, "2026-10-03T00:00:00.000Z");
+  assert.equal(entries[3].normalAt, null);
+  assert.equal(entries[3].abnormalAt, "2026-10-04T00:00:00.000Z");
+
+  const withFallback = timelineEventsWithTimes(
+    [{ id: "b", at: "2026-10-04T00:00:00.000Z", status: "unavailable" }],
+    new Map([["b", "2026-10-03T00:00:00.000Z"]])
+  );
+  assert.equal(withFallback[0].normalAt, "2026-10-03T00:00:00.000Z");
+  assert.equal(withFallback[0].abnormalAt, "2026-10-04T00:00:00.000Z");
+});
+
+test("sorts the timeline by normal time and groups anomalies into their normal episode", () => {
+  const events = [
+    { id: "a", at: "2026-10-01T00:00:00.000Z", status: "healthy" },
+    { id: "a", at: "2026-10-05T00:00:00.000Z", status: "degraded" },
+    { id: "b", at: "2026-10-04T00:00:00.000Z", status: "healthy" },
+    { id: "b", at: "2026-10-06T00:00:00.000Z", status: "unknown" }
+  ];
+  const ordered = sortedTimelineByNormalTime(events);
+  assert.deepStrictEqual(
+    ordered.map((event) => `${event.id}:${event.status}`),
+    ["b:unknown", "b:healthy", "a:degraded", "a:healthy"]
+  );
+});
+
+test("builds environment filter options from displayed Cluster names", () => {
+  const watches = [
+    {
+      baseUrl: "https://rancher.example.com",
+      clusterId: "c-a",
+      namespace: "pay",
+      deployment: "api",
+      environment: "生产环境"
+    },
+    {
+      baseUrl: "https://rancher.example.com",
+      clusterId: "c-a",
+      namespace: "pay",
+      deployment: "worker",
+      environment: "生产环境"
+    },
+    {
+      baseUrl: "https://rancher.example.com",
+      clusterId: "c-b",
+      namespace: "test",
+      deployment: "api",
+      environment: "测试环境"
+    },
+    {
+      baseUrl: "https://rancher.example.com",
+      clusterId: "c-c",
+      namespace: "dev",
+      deployment: "api"
+    }
+  ];
+  const settings = {
+    clusterNames: { [clusterKey(watches[0])]: "主生产" }
+  };
+  const options = timelineEnvironmentOptions(watches, settings);
+  assert.equal(options.length, 3);
+  assert.equal(options.find((option) => option.key === clusterKey(watches[0]))?.name, "主生产");
+  assert.equal(options.find((option) => option.key === clusterKey(watches[2]))?.name, "测试环境");
+  assert.equal(options.find((option) => option.key === clusterKey(watches[3]))?.name, "c-c");
 });
 
 test("accepts the timeline view mode through export and import", () => {
