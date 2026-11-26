@@ -374,15 +374,15 @@ function renderTimeline(environments = []) {
               ${abnormalTime}
             </div>
           </div>
-          <div class="timeline-head">
+          <div class="timeline-line">
             <div class="timeline-title">
               <strong>${escapeHtml(deploymentDisplayName(watch))}</strong>
               <span class="timeline-place">${escapeHtml(clusterDisplayName(watch, settings))} · ${escapeHtml(watch.namespace)}/${escapeHtml(watch.deployment)}</span>
+              ${note ? `<span class="timeline-note" title="${escapeHtml(note)}">${escapeHtml(note)}</span>` : ""}
             </div>
             <span class="status ${escapeHtml(event.status)}">${statusText[event.status] || "未知"}</span>
+            <button class="link-button timeline-open" data-id="${escapeHtml(event.id)}">打开 Rancher</button>
           </div>
-          ${note ? `<div class="timeline-note">${escapeHtml(note)}</div>` : ""}
-          <button class="link-button timeline-open" data-id="${escapeHtml(event.id)}">打开 Rancher</button>
         </div>
       </li>`;
   }).join("");
